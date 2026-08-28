@@ -1,0 +1,22 @@
+﻿  glad.c
+  MeinKampf.cpp
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(162,25): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(163,25): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(167,25): warning C4267: 'initializing': conversion from 'size_t' to 'uint', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(190,35): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(272,24): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(273,24): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(278,17): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(279,17): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(283,19): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(284,19): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(285,13): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(286,13): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\user\source\repos\MeinKampf\MeinKampf.cpp(392,20): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+  stb_image.cpp
+  Generating Code...
+LINK : warning LNK4098: defaultlib 'MSVCRT' conflicts with use of other libs; use /NODEFAULTLIB:library
+  MeinKampf.vcxproj -> C:\Users\user\source\repos\MeinKampf\x64\Debug\MeinKampf.exe
+  C:\Users\user\source\repos\MeinKampf\x64\Debug\MeinKampf.exe: message: deploying dependencies
+  C:\Users\user\source\repos\MeinKampf\assets\block.png
+  1 File(s) copied
