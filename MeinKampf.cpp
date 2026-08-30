@@ -37,11 +37,28 @@ void main(){
 FragColor=texture(texture0, TextCoord);
 }
 )";
+
+const char* HighlightVertexSource = R"(
+#version 330 core
+layout(location=0) in vec3 aPos;
+uniform mat4 MVP;
+void main(){
+    gl_Position=MVP*vec4(aPos,1.0);
+}
+)";
+const char* HighlightFragmentSource = R"(
+#version 330 core
+out vec4 FragColor;
+void main(){
+FragColor=vec4(0.0,0.0,0.0,1.0);
+}
+)";
 uint ShaderProgram;
+uint HighlightShaderProgram;
 uint ATLAS;
 bool mouseLocked = false;
 struct camera {
-    glm::vec3 position{ 0.0f,0.0f,10.0f }, front{ 0.0f,0.0f,-1.0f }, up{ 0.0f,1.0f,0.0f };
+    glm::vec3 position{ 0.0f }, front{ 0.0f,0.0f,-1.0f }, up{ 0.0f,1.0f,0.0f };
     camera() {
 
     }
@@ -54,6 +71,9 @@ struct vertex {
     float x, y, z, u, v;
     vertex(float x, float y, float z, float u, float v) : x(x), y(y), z(z), u(u), v(v) {
 
+    }
+    vertex() {
+        x = 0;y = 0;z = 0;u = 0;v = 0;
     }
 };
 enum block {
@@ -95,9 +115,10 @@ struct ChunkHash {
 class Player {
 public:
     camera cam;
-    glm::vec3 position{ 0.0f };
+    glm::vec3 position{ 0.0f,0.0f,10.0f };
     float SPEED = 10.0f;
     int RenderDistance = 10;
+    int reach = 15.0f;
     Player() {
 
     }
@@ -112,7 +133,7 @@ std::unordered_map<ChunkPos, chunk, ChunkHash> ChunkPool;
 class chunk {
 private:
     uint VAO = 0;
-
+    uint VBO, EBO;
 
     int indicessize = 0;
 public:
@@ -125,6 +146,17 @@ public:
     std::array<block, 16 * 16 * 256> BLOCKS{};
     chunk() {
 
+    }
+    ~chunk()
+    {
+        if (VAO)
+            glDeleteVertexArrays(1, &VAO);
+
+        if (VBO)
+            glDeleteBuffers(1, &VBO);
+
+        if (EBO)
+            glDeleteBuffers(1, &EBO);
     }
     void Load() {
         if (!loaded || !generated) {
@@ -167,53 +199,76 @@ public:
 
         for (int i = 0;i < sizeof(BLOCKS) / sizeof(block);i++) {
             if (BLOCKS[i] == AIR)continue;
-            std::vector<vertex> Blockvertices = {
-
-            };
+            std::array<vertex, 24> Blockvertices;
+            int vertexCount = 0;
 
             glm::ivec3 pos = GetPosition(i);
 
             //Front
             if (GetBlockAt(pos + glm::ivec3{ 0,0,1 }) == AIR) {
-                Blockvertices.emplace_back(-0.5f, -0.5f, 0.5f, 0.0f, 0.0f);
-                Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, 1.0f / 32.0f, 0.0f);
-                Blockvertices.emplace_back(0.5f, 0.5f, 0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
-                Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, 0.0f, 1.0f / 32.0f);
+                Blockvertices[vertexCount]=vertex(-0.5f, -0.5f, 0.5f, 0.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, 1.0f / 32.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, 0.0f, 1.0f / 32.0f);
+                vertexCount++;
             }
             //Back
             if (GetBlockAt(pos + glm::ivec3{ 0,0,-1 }) == AIR) {
-                Blockvertices.emplace_back(0.5f, -0.5f, -0.5f, 0.0f, 0.0f);
-                Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, 1.0f / 32.0f, 0.0f);
-                Blockvertices.emplace_back(-0.5f, 0.5f, -0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
-                Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, 0.0f, 1.0f / 32.0f);
+                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, 0.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, 1.0f / 32.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, 0.0f, 1.0f / 32.0f);
+                vertexCount++;
             }
             //Left
             if (GetBlockAt(pos + glm::ivec3{ -1,0,0 }) == AIR) {
-                Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f);
-                Blockvertices.emplace_back(-0.5f, -0.5f, 0.5f, 1.0f / 32.0f, 0.0f);
-                Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
-                Blockvertices.emplace_back(-0.5f, 0.5f, -0.5f, 0.0f, 1.0f / 32.0f);
+                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, 1.0f / 32.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, 0.0f, 1.0f / 32.0f);
+                vertexCount++;
             }
             //Right
             if (GetBlockAt(pos + glm::ivec3{ 1,0,0 }) == AIR) {
-                Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, 0.0f, 0.0f);
-                Blockvertices.emplace_back(0.5f, -0.5f, -0.5f, 1.0f / 32.0f, 0.0f);
-                Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
-                Blockvertices.emplace_back(0.5f, 0.5f, 0.5f, 0.0f, 1.0f / 32.0f);
+                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, 0.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, 1.0f / 32.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, 0.0f, 1.0f / 32.0f);
+                vertexCount++;
             }
             //Top
             if (GetBlockAt(pos + glm::ivec3{ 0,1,0 }) == AIR) {
-                Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, 0.0f, 0.0f),
-                    Blockvertices.emplace_back(0.5f, 0.5f, 0.5f, 1.0f / 32.0f, 0.0f);
-                Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
-                Blockvertices.emplace_back(-0.5f, 0.5f, -0.5f, 0.0f, 1.0f / 32.0f);
+                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, 0.0f, 0.0f),
+                    vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, 1.0f / 32.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, 0.0f, 1.0f / 32.0f);
+                vertexCount++;
             }
             //Bottom
             if (GetBlockAt(pos + glm::ivec3{ 0,-1,0 }) == AIR) {
-                Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f);
-                Blockvertices.emplace_back(0.5f, -0.5f, -0.5f, 1.0f / 32.0f, 0.0f);
-                Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
-                Blockvertices.emplace_back(-0.5f, -0.5f, 0.5f, 0.0f, 1.0f / 32.0f);
+                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, 1.0f / 32.0f, 0.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, 1.0f / 32.0f, 1.0f / 32.0f);
+                vertexCount++;
+                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, 0.0f, 1.0f / 32.0f);
+                vertexCount++;
             }
 
             float tileX = static_cast<int>(BLOCKS[i]) % 32;
@@ -251,9 +306,15 @@ public:
         glBindVertexArray(0);
         if (VAO != 0) {
             glDeleteVertexArrays(1, &VAO);
+            if(VBO!=0)
+                glDeleteBuffers(1, &VBO);
+            if(EBO!=0)
+                glDeleteBuffers(1, &EBO);
             VAO = 0;
+            VBO = 0;
+            EBO = 0;
         }
-        uint VBO, EBO;
+        
         glGenVertexArrays(1, &VAO);
         glGenBuffers(1, &VBO);
         glGenBuffers(1, &EBO);
@@ -280,9 +341,9 @@ public:
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-        /* generating = false;
-         generated = true;*/
-
+         generating = false;
+         generated = true;
+        dirty = false;
     }
 
 
@@ -296,7 +357,7 @@ public:
     }
     void PlaceBlock(glm::ivec3 position, block BlockType) {
         BLOCKS[GetID(position)] = BlockType;
-        dirty = true;
+        //dirty = true;
     }
     void FillBlocks(glm::ivec3 pos1, glm::ivec3 pos2, block BlockType) {
         int minX = std::min(pos1.x, pos2.x);
@@ -343,17 +404,44 @@ public:
 };
 
 void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
-    if (ChunkPool.count(position)) {
-        ChunkPool.at(position).PlaceBlock(glm::ivec3(floor(position.x / 16.0f), position.y, floor(position.z / 16.0f)), BlockType);
-    }
+    
+    ChunkPos cp(
+        static_cast<int>(floor(position.x / 16.0f)),
+        static_cast<int>(floor(position.z / 16.0f))
+    );
+    glm::ivec3 local(
+        position.x - cp.x * 16,
+        position.y,
+        position.z - cp.z * 16
+    );
+    if (local.x < 0 || local.x >= 16 ||
+        local.y < 0 || local.y >= 256 ||
+        local.z < 0 || local.z >= 16)
+        return;
+
+    auto [it, inserted] = ChunkPool.try_emplace(cp);
+
+    it->second.PlaceBlock(local, BlockType);
+    it->second.dirty = true;
+    
 }
-block GlobalGetBlockAt(glm::ivec3 position) {
-    if (ChunkPool.count(position)) {
-        return ChunkPool.at(position).GetBlockAt(glm::ivec3(floor(position.x / 16.0f), position.y, floor(position.z / 16.0f)));
-    }
-    else {
+block GlobalGetBlockAt(glm::ivec3 position)
+{
+    ChunkPos cp(
+        static_cast<int>(glm::floor(position.x / 16.0f)),
+        static_cast<int>(glm::floor(position.z / 16.0f))
+    );
+
+    glm::ivec3 local(
+        position.x - cp.x * 16,
+        position.y,
+        position.z - cp.z * 16
+    );
+
+    if (!ChunkPool.count(cp))
         return AIR;
-    }
+
+    return ChunkPool.at(cp).GetBlockAt(local);
 }
 bool ChunkLoaded(ChunkPos position) {
     if (ChunkPool.count(position)) {
@@ -414,6 +502,59 @@ void mouseMove(GLFWwindow* window, double xpos, double ypos) {
 
     player.cam.front = glm::normalize(player.cam.front);
 }
+void mouseDown(GLFWwindow* window, int button, int action, int mods) {
+    //place block
+    if (action == GLFW_PRESS&&button==GLFW_MOUSE_BUTTON_2) {
+        float dist = 0.0f;
+        float step = 0.1f;
+        ChunkPos Hchunk(0, 0);
+        glm::ivec3 localpos(0, 0, 0);
+        glm::ivec3 hitBlock;
+        glm::ivec3 previousBlock(0, 0, 0);
+        bool hitblockset = false;
+        bool previousset = false;
+        ChunkPos cp(0,0);
+        while (dist <= player.reach)
+        {
+            glm::vec3 ray =
+                player.position +
+                player.cam.position +
+                player.cam.front * dist;
+
+            glm::ivec3 blockPos = glm::ivec3(
+                glm::floor(ray + glm::vec3(0.5f))
+            );
+
+            cp=ChunkPos(
+                static_cast<int>(glm::floor(blockPos.x / 16.0f)),
+                static_cast<int>(glm::floor(blockPos.z / 16.0f))
+            );
+
+            glm::ivec3 local(
+                blockPos.x - cp.x * 16,
+                blockPos.y,
+                blockPos.z - cp.z * 16
+            );
+
+            if (ChunkPool.count(cp) &&
+                ChunkPool.at(cp).GetBlockAt(local) != AIR)
+            {
+                localpos = local;
+                Hchunk = cp;
+                hitBlock = blockPos;
+                hitblockset = true;
+                break;
+            }
+            previousBlock = blockPos;
+            previousset = true;
+            dist += step;
+        }
+        if (previousset&& hitblockset) {
+            GlobalSetBlockAt(previousBlock, DIRT);
+        }
+    }
+}
+
 void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_RELEASE) {
         mouseLocked = !mouseLocked;
@@ -429,8 +570,8 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
 }
 void LoadChunks() {
     glm::vec3 plposdiv = player.position / 16.0f;
-    for (int x = plposdiv.x - player.RenderDistance / 2;x < plposdiv.x + player.RenderDistance / 2;x++) {
-        for (int z = plposdiv.z - player.RenderDistance / 2;z < plposdiv.z + player.RenderDistance / 2;z++) {
+    for (int x = plposdiv.x - player.RenderDistance;x < plposdiv.x + player.RenderDistance;x++) {
+        for (int z = plposdiv.z - player.RenderDistance;z < plposdiv.z + player.RenderDistance;z++) {
             if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
                 //genchunk
                 ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
@@ -452,6 +593,10 @@ void LoadChunks() {
                     }
 
                 }
+                else if (ChunkPool.at(cp).dirty) {
+                    //regen
+                    ChunkPool.at(cp).Generate();
+                }
             }
 
         }
@@ -459,6 +604,7 @@ void LoadChunks() {
     }
 }
 GLFWwindow* window;
+uint HighLightVAO;
 int main()
 {
 #pragma region Init
@@ -475,29 +621,57 @@ int main()
 
 
 #pragma region Shaderki
-    uint VS = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(VS, 1, &VertexSource, NULL);
-    glCompileShader(VS);
+    {
+        uint VS = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(VS, 1, &VertexSource, NULL);
+        glCompileShader(VS);
 
 
-    uint FS = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(FS, 1, &FragmentSource, NULL);
-    glCompileShader(FS);
+        uint FS = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(FS, 1, &FragmentSource, NULL);
+        glCompileShader(FS);
 
-    ShaderProgram = glCreateProgram();
-    glAttachShader(ShaderProgram, VS);
-    glAttachShader(ShaderProgram, FS);
-    glLinkProgram(ShaderProgram);
+        ShaderProgram = glCreateProgram();
+        glAttachShader(ShaderProgram, VS);
+        glAttachShader(ShaderProgram, FS);
+        glLinkProgram(ShaderProgram);
 
-    glDeleteShader(VS);
-    glDeleteShader(FS);
+        glDeleteShader(VS);
+        glDeleteShader(FS);
+    }
+
+
+    //Block highligh shader
+    {
+        uint VS = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(VS, 1, &HighlightVertexSource, NULL);
+        glCompileShader(VS);
+
+
+        uint FS = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(FS, 1, &HighlightFragmentSource, NULL);
+        glCompileShader(FS);
+
+        HighlightShaderProgram = glCreateProgram();
+        glAttachShader(HighlightShaderProgram, VS);
+        glAttachShader(HighlightShaderProgram, FS);
+        glLinkProgram(HighlightShaderProgram);
+
+        glDeleteShader(VS);
+        glDeleteShader(FS);
+    }
+
+
 #pragma endregion
     glfwSetKeyCallback(window, keyDown);
     glfwSetCursorPosCallback(window, mouseMove);
     glfwSetFramebufferSizeCallback(window, resize);
+    glfwSetMouseButtonCallback(window, mouseDown);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glViewport(0, 0, 960, 540);
     glClearColor(66.0f / 255.0f, 135.0f / 255.0f, 245.0f / 255.0f, 1.0f);
@@ -514,12 +688,92 @@ int main()
 
     glTexImage2D(GL_TEXTURE_2D, NULL, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+        GL_NEAREST_MIPMAP_LINEAR);
+
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, -1.5f);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glGenerateMipmap(GL_TEXTURE_2D);
 
 
+#pragma endregion
+
+#pragma region Create Highlight VAO
+    {
+        std::vector<vertex> Cube = {
+            // Front
+            vertex(-0.5f, -0.5f,  0.5f, 0, 0),
+            vertex(0.5f, -0.5f,  0.5f, 0, 0),
+
+            vertex(0.5f, -0.5f,  0.5f, 0, 0),
+            vertex(0.5f,  0.5f,  0.5f, 0, 0),
+
+            vertex(0.5f,  0.5f,  0.5f, 0, 0),
+            vertex(-0.5f,  0.5f,  0.5f, 0, 0),
+
+            vertex(-0.5f,  0.5f,  0.5f, 0, 0),
+            vertex(-0.5f, -0.5f,  0.5f, 0, 0),
+
+            // Back
+            vertex(-0.5f, -0.5f, -0.5f, 0, 0),
+            vertex(0.5f, -0.5f, -0.5f, 0, 0),
+
+            vertex(0.5f, -0.5f, -0.5f, 0, 0),
+            vertex(0.5f,  0.5f, -0.5f, 0, 0),
+
+            vertex(0.5f,  0.5f, -0.5f, 0, 0),
+            vertex(-0.5f,  0.5f, -0.5f, 0, 0),
+
+            vertex(-0.5f,  0.5f, -0.5f, 0, 0),
+            vertex(-0.5f, -0.5f, -0.5f, 0, 0),
+
+            // Left
+            vertex(-0.5f, -0.5f, -0.5f, 0, 0),
+            vertex(-0.5f, -0.5f,  0.5f, 0, 0),
+
+            vertex(-0.5f,  0.5f, -0.5f, 0, 0),
+            vertex(-0.5f,  0.5f,  0.5f, 0, 0),
+
+            // Right
+            vertex(0.5f, -0.5f, -0.5f, 0, 0),
+            vertex(0.5f, -0.5f,  0.5f, 0, 0),
+
+            vertex(0.5f,  0.5f, -0.5f, 0, 0),
+            vertex(0.5f,  0.5f,  0.5f, 0, 0),
+
+            // Bottom
+            vertex(-0.5f, -0.5f, -0.5f, 0, 0),
+            vertex(0.5f, -0.5f, -0.5f, 0, 0),
+
+            vertex(-0.5f, -0.5f,  0.5f, 0, 0),
+            vertex(0.5f, -0.5f,  0.5f, 0, 0),
+
+            // Top
+            vertex(-0.5f,  0.5f, -0.5f, 0, 0),
+            vertex(0.5f,  0.5f, -0.5f, 0, 0),
+
+            vertex(-0.5f,  0.5f,  0.5f, 0, 0),
+            vertex(0.5f,  0.5f,  0.5f, 0, 0)
+        };
+        uint vbo;
+        glGenVertexArrays(1, &HighLightVAO);
+        glGenBuffers(1, &vbo);
+
+        glBindVertexArray(HighLightVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+        glBufferData(GL_ARRAY_BUFFER, Cube.size() * sizeof(vertex), Cube.data(), GL_STATIC_DRAW);
+        //pos
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
 #pragma endregion
 
 
@@ -530,6 +784,8 @@ int main()
 
 
     //TESTCHUNK.Generate();
+
+    
     
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
@@ -560,8 +816,8 @@ int main()
         //TESTCHUNK.Render();
 
         glm::vec3 plposdiv = player.position / 16.0f;
-        for (int x = plposdiv.x - player.RenderDistance / 2;x < plposdiv.x + player.RenderDistance / 2;x++) {
-            for (int z = plposdiv.z - player.RenderDistance / 2;z < plposdiv.z + player.RenderDistance / 2;z++) {
+        for (int x = plposdiv.x - player.RenderDistance;x < plposdiv.x + player.RenderDistance;x++) {
+            for (int z = plposdiv.z - player.RenderDistance;z < plposdiv.z + player.RenderDistance;z++) {
                 if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
                     //genchunk
                     ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
@@ -580,6 +836,67 @@ int main()
 
         }
 
+        //block highlights
+        float dist = 0.0f;
+        float step = 0.1f;
+        uint mvploc2 = glGetUniformLocation(HighlightShaderProgram, "MVP");
+        glUseProgram(HighlightShaderProgram);
+        ChunkPos Hchunk(0,0);
+        glm::ivec3 localpos(0,0,0);
+        glm::ivec3 hitBlock;
+        glm::ivec3 previousBlock(0,0,0);
+        while (dist <= player.reach)
+        {
+            glm::vec3 ray =
+                player.position +
+                player.cam.position +
+                player.cam.front * dist;
+
+            glm::ivec3 blockPos = glm::ivec3(
+                glm::floor(ray + glm::vec3(0.5f))
+            );
+
+            ChunkPos cp(
+                static_cast<int>(glm::floor(blockPos.x / 16.0f)),
+                static_cast<int>(glm::floor(blockPos.z / 16.0f))
+            );
+
+            glm::ivec3 local(
+                blockPos.x - cp.x * 16,
+                blockPos.y,
+                blockPos.z - cp.z * 16
+            );
+
+            if (ChunkPool.count(cp) &&
+                ChunkPool.at(cp).GetBlockAt(local) != AIR)
+            {
+                localpos = local;
+                Hchunk = cp;
+                hitBlock = blockPos;
+                break;
+            }
+            previousBlock = blockPos;
+            dist += step;
+        }
+        glBindVertexArray(HighLightVAO);
+
+        glm::vec3 blockWorldPos(
+            Hchunk.x * 16.0f + localpos.x,
+            localpos.y,
+            Hchunk.z * 16.0f + localpos.z
+        );
+
+        glm::mat4 model(1.0f);
+        model = glm::translate(model, blockWorldPos);
+        model = glm::scale(model, glm::vec3(1.005f, 1.005f, 1.005f));
+        glm::mat4 MVP = projection * view * model;
+
+        glUniformMatrix4fv(mvploc2, 1, GL_FALSE, glm::value_ptr(MVP));
+        glLineWidth(2.0f);
+        glDrawArrays(GL_LINES, 0, 32);
+
+        //test
+        
 
         glfwSwapBuffers(window);
         glfwPollEvents();
