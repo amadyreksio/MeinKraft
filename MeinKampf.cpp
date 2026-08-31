@@ -7,7 +7,8 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "stb_image.h"
-
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 #include <vector>
 #include <array>
 
@@ -17,6 +18,10 @@
 #include <chrono>
 #include <mutex>
 #include <random>
+#include <string>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 std::random_device rd;
 std::uniform_real_distribution<float> rnd;
 float RandomNumber(float min, float max) {
@@ -27,9 +32,12 @@ const char* VertexSource = R"(
 #version 330 core
 layout(location=0) in vec3 aPos;
 layout (location = 1) in vec2 textcoord;
+layout (location = 2) in int AO;
 out vec2 TextCoord;
+out float ao;
 uniform mat4 MVP;
 void main(){
+    ao=float(AO);
     TextCoord=textcoord;
     gl_Position=MVP*vec4(aPos,1.0);
 }
@@ -38,9 +46,16 @@ const char* FragmentSource = R"(
 #version 330 core
 out vec4 FragColor;
 in vec2 TextCoord;
+in float ao;
 uniform sampler2D texture0;
 void main(){
-FragColor=texture(texture0, TextCoord);
+ float aoLevel = float(ao) / 3.0;
+aoLevel+=0.1;
+    FragColor = texture(texture0, TextCoord)*vec4(aoLevel, aoLevel, aoLevel, 1.0);
+//vec4(aoLevel, aoLevel, aoLevel, 1.0);
+
+//FragColor=vec4(aocl,0.0,0.0,1.0);
+//
 }
 )";
 
@@ -59,6 +74,7 @@ void main(){
 FragColor=vec4(0.0,0.0,0.0,1.0);
 }
 )";
+bool DoScreenshot = false;
 uint ShaderProgram;
 uint HighlightShaderProgram;
 uint ATLAS;
@@ -77,8 +93,13 @@ struct camera {
 };
 
 struct vertex {
-    float x, y, z, u, v;
+    float x, y, z;
+    float u, v;
+    uint8_t AO=0;
     vertex(float x, float y, float z, float u, float v) : x(x), y(y), z(z), u(u), v(v) {
+
+    }
+    vertex(float x, float y, float z, float u, float v, uint8_t AO) : x(x), y(y), z(z), u(u), v(v), AO(AO) {
 
     }
     vertex() {
@@ -224,15 +245,16 @@ class chunk;
 std::unordered_map<ChunkPos, chunk, ChunkHash> ChunkPool;
 
 
-
+void UploadChunk(chunk* ch);
 
 class chunk {
 private:
+    
+public:
     uint VAO = 0;
     uint VBO, EBO;
 
     int indicessize = 0;
-public:
     bool generating = false;
     bool loading = false;
     bool generated = false;
@@ -259,223 +281,11 @@ public:
 
         }
     }
+
+
+
     void Generate() {
-        generated = false;
-        generating = true;
-        //ChunkGenerateJobs.push_back()
-        std::vector<vertex> vertices = {};
-        std::vector<uint> indices = {};
-
-
-        std::vector<uint> Blockindices = {
-            //Front
-             0,  1,  2,
-             2,  3,  0,
-
-             //Back
-              4,  5,  6,
-              6,  7,  4,
-
-              //Left
-               8,  9, 10,
-              10, 11,  8,
-
-              //Right
-              12, 13, 14,
-              14, 15, 12,
-
-              //Top
-              16, 17, 18,
-              18, 19, 16,
-
-              //Bottom
-              20, 21, 22,
-              22, 23, 20
-        };
-
-        for (int i = 0;i < sizeof(BLOCKS) / sizeof(block);i++) {
-            if (BLOCKS[i] == AIR)continue;
-            std::array<vertex, 24> Blockvertices;
-            int vertexCount = 0;
-
-            glm::ivec3 pos = GetPosition(i);
-
-
-            float tileX = static_cast<int>(BLOCKS[i]) % 32;
-            float tileY = static_cast<int>(BLOCKS[i]) / 32;
-
-            //const float ATLAS_SIZE = 256.0f;
-            //const float TILE_SIZE = 16.0f;
-            //const float BORDER = 2.0f;
-            //const float CELL_SIZE = TILE_SIZE + BORDER * 2.0f; // 20
-
-            //float x0 = (tileX) * CELL_SIZE + BORDER;
-            //float x1 = x0 + TILE_SIZE;
-
-            //float y0 = tileY * CELL_SIZE + BORDER;
-            //float y1 = y0 + TILE_SIZE;
-
-            //float sX = x0 / ATLAS_SIZE;
-            //float eX = x1 / ATLAS_SIZE;
-
-            //float sY = 1.0f-(y0 / ATLAS_SIZE);
-            //float eY = 1.0f-(y1 / ATLAS_SIZE);
-
-            float x0 = tileX * 16.0f;
-            float x1 = x0 + 16.0f;
-
-            
-
-
-            float y0 = tileY * 16.0f;
-            float y1 = y0 + 16.0f;
-
-            float tm = y0;
-            y0 = y1;
-            y1 = tm;
-
-            float sX = x0 / 512.0f;
-            float eX = x1 / 512.0f;
-            
-            float sY = 1.0f - (y0 / 512.0f);
-            float eY = 1.0f - (y1 / 512.0f);
-
-            //Front
-            if (GetBlockAt(pos + glm::ivec3{ 0,0,1 }) == AIR) {
-                Blockvertices[vertexCount]=vertex(-0.5f, -0.5f, 0.5f, sX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, eY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, eY);
-                vertexCount++;
-            }
-            //Back
-            if (GetBlockAt(pos + glm::ivec3{ 0,0,-1 }) == AIR) {
-                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, sX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, eX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, eX, eY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, sX, eY);
-                vertexCount++;
-            }
-            //Left
-            if (GetBlockAt(pos + glm::ivec3{ -1,0,0 }) == AIR) {
-                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, eX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, eX, eY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, sX, eY);
-                vertexCount++;
-            }
-            //Right
-            if (GetBlockAt(pos + glm::ivec3{ 1,0,0 }) == AIR) {
-                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, sX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, eX, eY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, sX, eY);
-                vertexCount++;
-            }
-            //Top
-            if (GetBlockAt(pos + glm::ivec3{ 0,1,0 }) == AIR) {
-                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, sY),
-                    vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, eX, eY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, sX, eY);
-                vertexCount++;
-            }
-            //Bottom
-            if (GetBlockAt(pos + glm::ivec3{ 0,-1,0 }) == AIR) {
-                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, eY);
-                vertexCount++;
-                Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, sX, eY);
-                vertexCount++;
-            }
-
-           
-            uint offset = vertices.size();
-            for (int i = 0;i < vertexCount;i++) {
-                vertex vert = Blockvertices[i];
-
-
-                vert.x += pos.x;
-                vert.y += pos.y;
-                vert.z += pos.z;
-                //vert.u += sX;
-                //vert.v += sY;
-                vertices.push_back(vert);
-            }
-
-            for (uint i = 0; i < Blockvertices.size(); i += 4) {
-                indices.push_back(offset + i + 0);
-                indices.push_back(offset + i + 1);
-                indices.push_back(offset + i + 2);
-
-                indices.push_back(offset + i + 2);
-                indices.push_back(offset + i + 3);
-                indices.push_back(offset + i + 0);
-            }
-        }
-        indicessize = indices.size();
-
-
-
-        glBindVertexArray(0);
-        if (VAO != 0) {
-            glDeleteVertexArrays(1, &VAO);
-            if(VBO!=0)
-                glDeleteBuffers(1, &VBO);
-            if(EBO!=0)
-                glDeleteBuffers(1, &EBO);
-            VAO = 0;
-            VBO = 0;
-            EBO = 0;
-        }
-        
-        glGenVertexArrays(1, &VAO);
-        glGenBuffers(1, &VBO);
-        glGenBuffers(1, &EBO);
-        glBindVertexArray(VAO);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-
-
-        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertex), vertices.data(), GL_STATIC_DRAW);
-
-        //pos
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
-        //uv
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3 * sizeof(float)));
-
-
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint), indices.data(), GL_STATIC_DRAW);
-
-
-        glEnableVertexAttribArray(0);
-        glEnableVertexAttribArray(1);
-
-
-        glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-         generating = false;
-         generated = true;
-        dirty = false;
+        UploadChunk(this);
     }
 
 
@@ -601,6 +411,421 @@ block GlobalGetBlockAt(glm::ivec3 position)
 
     return ChunkPool.at(cp).GetBlockAt(local);
 }
+
+void UploadChunk(chunk* ch) {
+    ch->generated = false;
+    ch->generating = true;
+    //ChunkGenerateJobs.push_back()
+    std::vector<vertex> vertices = {};
+    std::vector<uint> indices = {};
+
+
+    std::vector<uint> Blockindices = {
+        //Front
+         0,  1,  2,
+         2,  3,  0,
+
+         //Back
+          4,  5,  6,
+          6,  7,  4,
+
+          //Left
+           8,  9, 10,
+          10, 11,  8,
+
+          //Right
+          12, 13, 14,
+          14, 15, 12,
+
+          //Top
+          16, 17, 18,
+          18, 19, 16,
+
+          //Bottom
+          20, 21, 22,
+          22, 23, 20
+    };
+
+    for (int i = 0;i < sizeof(ch->BLOCKS) / sizeof(block);i++) {
+        if (ch->BLOCKS[i] == AIR)continue;
+        std::array<vertex, 24> Blockvertices;
+        int vertexCount = 0;
+
+        glm::ivec3 pos = ch->GetPosition(i);
+
+
+        float tileX = static_cast<int>(ch->BLOCKS[i]) % 32;
+        float tileY = static_cast<int>(ch->BLOCKS[i]) / 32;
+
+        //const float ATLAS_SIZE = 256.0f;
+        //const float TILE_SIZE = 16.0f;
+        //const float BORDER = 2.0f;
+        //const float CELL_SIZE = TILE_SIZE + BORDER * 2.0f; // 20
+
+        //float x0 = (tileX) * CELL_SIZE + BORDER;
+        //float x1 = x0 + TILE_SIZE;
+
+        //float y0 = tileY * CELL_SIZE + BORDER;
+        //float y1 = y0 + TILE_SIZE;
+
+        //float sX = x0 / ATLAS_SIZE;
+        //float eX = x1 / ATLAS_SIZE;
+
+        //float sY = 1.0f-(y0 / ATLAS_SIZE);
+        //float eY = 1.0f-(y1 / ATLAS_SIZE);
+
+        float x0 = tileX * 16.0f;
+        float x1 = x0 + 16.0f;
+
+
+
+
+        float y0 = tileY * 16.0f;
+        float y1 = y0 + 16.0f;
+
+        float tm = y0;
+        y0 = y1;
+        y1 = tm;
+
+        float sX = x0 / 512.0f;
+        float eX = x1 / 512.0f;
+
+        float sY = 1.0f - (y0 / 512.0f);
+        float eY = 1.0f - (y1 / 512.0f);
+
+
+        //AMBIENT OCCLUSION
+#pragma region AO
+
+
+
+        uint8_t AO[6][4];
+        
+        auto CalculateAO = [&](glm::ivec3 normal, glm::ivec3 side1, glm::ivec3 side2, glm::ivec3 corner) -> uint8_t
+            {
+                bool s1 = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z)*16 + pos + normal + side1) != AIR);
+                bool s2 = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z)*16 + pos + normal + side2) != AIR);
+                bool c = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z)*16 + pos + normal + side1 + side2) != AIR);
+                if (s1 && s2) return 0; return 3 - (s1 + s2 + c);
+            };
+
+        AO[0][0] = CalculateAO(
+            { 0, 0, 1 },
+            { -1, 0, 0 },
+            { 0, -1, 0 },
+            { -1, -1, 0 }
+        );
+
+        AO[0][1] = CalculateAO(
+            { 0, 0, 1 },
+            { 1, 0, 0 },
+            { 0, -1, 0 },
+            { 1, -1, 0 }
+        );
+
+        AO[0][2] = CalculateAO(
+            { 0, 0, 1 },
+            { 1, 0, 0 },
+            { 0, 1, 0 },
+            { 1, 1, 0 }
+        );
+
+        AO[0][3] = CalculateAO(
+            { 0, 0, 1 },
+            { -1, 0, 0 },
+            { 0, 1, 0 },
+            { -1, 1, 0 }
+        );
+
+
+        AO[1][0] = CalculateAO(
+            { 0, 0, -1 },
+            { 1, 0, 0 },
+            { 0, -1, 0 },
+            { 1, -1, 0 }
+        );
+
+        AO[1][1] = CalculateAO(
+            { 0, 0, -1 },
+            { -1, 0, 0 },
+            { 0, -1, 0 },
+            { -1, -1, 0 }
+        );
+
+        AO[1][2] = CalculateAO(
+            { 0, 0, -1 },
+            { -1, 0, 0 },
+            { 0, 1, 0 },
+            { -1, 1, 0 }
+        );
+
+        AO[1][3] = CalculateAO(
+            { 0, 0, -1 },
+            { 1, 0, 0 },
+            { 0, 1, 0 },
+            { 1, 1, 0 }
+        );
+
+
+        AO[2][0] = CalculateAO(
+            { -1, 0, 0 },
+            { 0, 0, -1 },
+            { 0, -1, 0 },
+            { 0, -1, -1 }
+        );
+
+        AO[2][1] = CalculateAO(
+            { -1, 0, 0 },
+            { 0, 0, 1 },
+            { 0, -1, 0 },
+            { 0, -1, 1 }
+        );
+
+        AO[2][2] = CalculateAO(
+            { -1, 0, 0 },
+            { 0, 0, 1 },
+            { 0, 1, 0 },
+            { 0, 1, 1 }
+        );
+
+        AO[2][3] = CalculateAO(
+            { -1, 0, 0 },
+            { 0, 0, -1 },
+            { 0, 1, 0 },
+            { 0, 1, -1 }
+        );
+
+
+        AO[3][0] = CalculateAO(
+            { 1, 0, 0 },
+            { 0, 0, 1 },
+            { 0, -1, 0 },
+            { 0, -1, 1 }
+        );
+
+        AO[3][1] = CalculateAO(
+            { 1, 0, 0 },
+            { 0, 0, -1 },
+            { 0, -1, 0 },
+            { 0, -1, -1 }
+        );
+
+        AO[3][2] = CalculateAO(
+            { 1, 0, 0 },
+            { 0, 0, -1 },
+            { 0, 1, 0 },
+            { 0, 1, -1 }
+        );
+
+        AO[3][3] = CalculateAO(
+            { 1, 0, 0 },
+            { 0, 0, 1 },
+            { 0, 1, 0 },
+            { 0, 1, 1 }
+        );
+
+
+        AO[4][0] = CalculateAO(
+            { 0, 1, 0 },
+            { -1, 0, 0 },
+            { 0, 0, 1 },
+            { -1, 0, 1 }
+        );
+
+        AO[4][1] = CalculateAO(
+            { 0, 1, 0 },
+            { 1, 0, 0 },
+            { 0, 0, 1 },
+            { 1, 0, 1 }
+        );
+
+        AO[4][2] = CalculateAO(
+            { 0, 1, 0 },
+            { 1, 0, 0 },
+            { 0, 0, -1 },
+            { 1, 0, -1 }
+        );
+
+        AO[4][3] = CalculateAO(
+            { 0, 1, 0 },
+            { -1, 0, 0 },
+            { 0, 0, -1 },
+            { -1, 0, -1 }
+        );
+
+        AO[5][0] = CalculateAO(
+            { 0, -1, 0 },
+            { -1, 0, 0 },
+            { 0, 0, -1 },
+            { -1, 0, -1 }
+        );
+
+        AO[5][1] = CalculateAO(
+            { 0, -1, 0 },
+            { 1, 0, 0 },
+            { 0, 0, -1 },
+            { 1, 0, -1 }
+        );
+
+        AO[5][2] = CalculateAO(
+            { 0, -1, 0 },
+            { 1, 0, 0 },
+            { 0, 0, 1 },
+            { 1, 0, 1 }
+        );
+
+        AO[5][3] = CalculateAO(
+            { 0, -1, 0 },
+            { -1, 0, 0 },
+            { 0, 0, 1 },
+            { -1, 0, 1 }
+        );
+
+
+#pragma endregion
+        //Front
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,1 }) == AIR) {
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, sX, sY, AO[0][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, sY, AO[0][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, eY, AO[0][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, eY, AO[0][3]);
+            vertexCount++;
+        }
+        //Back
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,-1 }) == AIR) {
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, sX, sY, AO[1][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, eX, sY, AO[1][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, eX, eY, AO[1][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, sX, eY, AO[1][3]);
+            vertexCount++;
+        }
+        //Left
+        if (ch->GetBlockAt(pos + glm::ivec3{ -1,0,0 }) == AIR) {
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[2][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, eX, sY, AO[2][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, eX, eY, AO[2][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, sX, eY, AO[2][3]);
+            vertexCount++;
+        }
+        //Right
+        if (ch->GetBlockAt(pos + glm::ivec3{ 1,0,0 }) == AIR) {
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, sX, sY, AO[3][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[3][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, eX, eY, AO[3][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, sX, eY, AO[3][3]);
+            vertexCount++;
+        }
+        //Top
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,1,0 }) == AIR) {
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, sY, AO[4][0]),
+                vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, sY, AO[4][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, eX, eY, AO[4][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, sX, eY, AO[4][3]);
+            vertexCount++;
+        }
+        //Bottom
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,-1,0 }) == AIR) {
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[5][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[5][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, eY, AO[5][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, sX, eY, AO[5][3]);
+            vertexCount++;
+        }
+
+
+        uint offset = vertices.size();
+        for (int i = 0;i < vertexCount;i++) {
+            vertex vert = Blockvertices[i];
+
+
+            vert.x += pos.x;
+            vert.y += pos.y;
+            vert.z += pos.z;
+            //vert.u += sX;
+            //vert.v += sY;
+            vertices.push_back(vert);
+        }
+
+        for (uint i = 0; i < Blockvertices.size(); i += 4) {
+            indices.push_back(offset + i + 0);
+            indices.push_back(offset + i + 1);
+            indices.push_back(offset + i + 2);
+
+            indices.push_back(offset + i + 2);
+            indices.push_back(offset + i + 3);
+            indices.push_back(offset + i + 0);
+        }
+    }
+    ch->indicessize = indices.size();
+
+
+
+    glBindVertexArray(0);
+    if (ch->VAO != 0) {
+        glDeleteVertexArrays(1, &ch->VAO);
+        if (ch->VBO != 0)
+            glDeleteBuffers(1, &ch->VBO);
+        if (ch->EBO != 0)
+            glDeleteBuffers(1, &ch->EBO);
+        ch->VAO = 0;
+        ch->VBO = 0;
+        ch->EBO = 0;
+    }
+
+    glGenVertexArrays(1, &ch->VAO);
+    glGenBuffers(1, &ch->VBO);
+    glGenBuffers(1, &ch->EBO);
+    glBindVertexArray(ch->VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, ch->VBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ch->EBO);
+
+
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertex), vertices.data(), GL_STATIC_DRAW);
+
+    //pos
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+    //uv
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3 * sizeof(float)));
+
+    //AO
+    glVertexAttribIPointer(2, 1, GL_UNSIGNED_BYTE, sizeof(vertex), (const void*)(5 * sizeof(float)));
+
+
+
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint), indices.data(), GL_STATIC_DRAW);
+
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glEnableVertexAttribArray(2);
+
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    ch->generating = false;
+    ch->generated = true;
+    ch->dirty = false;
+}
+
 bool ChunkLoaded(ChunkPos position) {
     if (ChunkPool.count(position)) {
         chunk& ch = ChunkPool.at(position);
@@ -627,8 +852,11 @@ bool ChunkGenerated(ChunkPos position) {
 void movement(float deltaTime);
 float pitch = 0.0f;
 float yaw = 0.0f;
+int WIDTH=1920/2, HEIGHT=1080/2;
 void resize(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
+    WIDTH = width;
+    HEIGHT = height;
 }
 void mouseMove(GLFWwindow* window, double xpos, double ypos) {
     static float lastX = xpos;
@@ -782,7 +1010,7 @@ void onScroll(GLFWwindow* window, double xoffset, double yoffset) {
         }
     }
 }
-
+float screenshottimer = 0.0f;
 void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_RELEASE) {
         mouseLocked = !mouseLocked;
@@ -794,6 +1022,13 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
 
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
+    }
+    else if (key == GLFW_KEY_F2 && action == GLFW_PRESS) {
+        if (screenshottimer <= 0.0f) {
+            DoScreenshot = true;
+            screenshottimer = 0.5f;
+        }
+
     }
 }
 void LoadChunks() {
@@ -858,6 +1093,7 @@ void LoadChunks() {
 }
 GLFWwindow* window;
 uint HighLightVAO;
+void ScreenShot();
 int main()
 {
 #pragma region Init
@@ -878,11 +1114,31 @@ int main()
         uint VS = glCreateShader(GL_VERTEX_SHADER);
         glShaderSource(VS, 1, &VertexSource, NULL);
         glCompileShader(VS);
+        {
+            int success;
+            glGetShaderiv(VS, GL_COMPILE_STATUS, &success);
+            if (!success) {
+                char log[512];
+                glGetShaderInfoLog(VS, 512, nullptr, log);
+                std::cout << "VERTEX SHADER ERROR: " << log;
+            }
+
+        }
 
 
         uint FS = glCreateShader(GL_FRAGMENT_SHADER);
         glShaderSource(FS, 1, &FragmentSource, NULL);
         glCompileShader(FS);
+        {
+            int success;
+            glGetShaderiv(FS, GL_COMPILE_STATUS, &success);
+            if (!success) {
+                char log[512];
+                glGetShaderInfoLog(FS, 512, nullptr, log);
+                std::cout << "FRAGMENT SHADER ERROR: " << log;
+            }
+
+        }
 
         ShaderProgram = glCreateProgram();
         glAttachShader(ShaderProgram, VS);
@@ -1161,7 +1417,12 @@ int main()
         }
         //test
         //DrawAABB(player.box.min+player.box.position, player.box.max+player.box.position, projection * view);
-        
+        if (screenshottimer > 0.0f) {
+            screenshottimer -= deltaTime;
+        }
+        if (DoScreenshot&&screenshottimer<=0.0f) {
+            ScreenShot();
+        }
 
         glfwSwapBuffers(window);
         
@@ -1303,4 +1564,50 @@ void movement(float deltaTime)
     }
     player.box.position = player.position;
     
+}
+
+void ScreenShot() {
+    std::vector<unsigned char> pixels(WIDTH * HEIGHT* 3);
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+
+    glReadPixels(0, 0,WIDTH, HEIGHT,GL_RGB,GL_UNSIGNED_BYTE,pixels.data());
+
+    for (int y = 0; y < HEIGHT / 2; ++y)
+    {
+        unsigned char* row1 = pixels.data() + y * WIDTH * 3;
+        unsigned char* row2 = pixels.data() + (HEIGHT - 1 - y) * WIDTH * 3;
+
+        for (int x = 0; x < WIDTH * 3; ++x)
+            std::swap(row1[x], row2[x]);
+    }
+   
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+
+    std::tm tm{};
+
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+
+    std::ostringstream filename;
+    filename << "SCREENSHOT-"
+        << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S")
+        << ".png";
+
+    std::string path = filename.str();
+
+    std::cout << path.c_str();
+    if (!stbi_write_png(path.c_str(), WIDTH, HEIGHT, 3, pixels.data(), WIDTH * 3)) {
+        std::cerr<<"chuj";
+        
+        return;
+    }
+    DoScreenshot = false;
+    screenshottimer = 0.5f;
+    
+
 }
