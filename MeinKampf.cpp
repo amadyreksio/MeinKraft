@@ -22,8 +22,14 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+
+#include <functional>
 std::random_device rd;
 std::uniform_real_distribution<float> rnd;
+enum GameStates {
+    MENU,WORLD_CHOOSE,INGAME
+};
+GameStates GAME_STATE=MENU;
 float RandomNumber(float min, float max) {
     return min + rnd(rd) * (max - min);
 }
@@ -50,7 +56,7 @@ in float ao;
 uniform sampler2D texture0;
 void main(){
  float aoLevel = float(ao) / 3.0;
-aoLevel+=0.1;
+aoLevel=min(1.0,aoLevel+0.2);
     FragColor = texture(texture0, TextCoord)*vec4(aoLevel, aoLevel, aoLevel, 1.0);
 //vec4(aoLevel, aoLevel, aoLevel, 1.0);
 
@@ -58,6 +64,58 @@ aoLevel+=0.1;
 //
 }
 )";
+
+const char* SimpleVertexSource = R"(
+#version 330 core
+layout(location=0) in vec3 aPos;
+layout (location = 1) in vec2 textcoord;
+out vec2 TextCoord;
+uniform mat4 MVP;
+void main(){
+    TextCoord=textcoord;
+    gl_Position=MVP*vec4(aPos,1.0);
+}
+)";
+const char* SimpleFragmentSource = R"(
+#version 330 core
+out vec4 FragColor;
+in vec2 TextCoord;
+uniform sampler2D texture0;
+void main(){
+    FragColor = texture(texture0, TextCoord);
+}
+)";
+
+
+const char* UIVertexSource = R"(
+#version 330 core
+layout(location=0) in vec3 aPos;
+layout (location = 1) in vec2 textcoord;
+out vec2 TextCoord;
+uniform mat4 MVP;
+
+void main(){
+    TextCoord=textcoord;
+    gl_Position=MVP*vec4(aPos,1.0);
+}
+)";
+const char* UIFragmentSource = R"(
+#version 330 core
+out vec4 FragColor;
+in vec2 TextCoord;
+uniform vec4 texcoord;
+uniform int useTexture;
+uniform sampler2D texture0;
+void main(){
+if(useTexture==1){
+    vec2 UV=TextCoord*vec2(texcoord[2],texcoord[3])+vec2(texcoord[0],texcoord[1]);
+    FragColor = texture(texture0, UV);
+}else{
+    FragColor=vec4(1.0,0.0,0.0,1.0);
+}
+}
+)";
+
 
 const char* HighlightVertexSource = R"(
 #version 330 core
@@ -76,8 +134,13 @@ FragColor=vec4(0.0,0.0,0.0,1.0);
 )";
 bool DoScreenshot = false;
 uint ShaderProgram;
+uint SimpleShaderProgram;
+uint UIShaderProgram;
 uint HighlightShaderProgram;
 uint ATLAS;
+uint UITEXTURE;
+uint SUBTITLES_TEXTURE;
+uint MENU_BG;
 bool mouseLocked = false;
 struct camera {
     glm::vec3 position{ 0.0f }, front{ 0.0f,0.0f,-1.0f }, up{ 0.0f,1.0f,0.0f };
@@ -216,6 +279,38 @@ void DrawAABB(const glm::vec3& min, const glm::vec3& max, const glm::mat4& vp)
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
 }
+uint UIVAO;
+float mx=0, my=0;
+struct UIElement {
+private:
+
+public:
+    bool useTexture = false;
+    bool visible=true;
+    std::string name="";
+    glm::vec2 TextureLocation{ 0,0 };
+    glm::vec2 TextureSize{100,100};
+    glm::vec4 BackgroundColor{ 0.0,0.0,0.0,1.0 };
+    glm::vec2 AnchorPoint{ 0.0f };
+    glm::vec2 Size{ 0.0f,0.0f };
+    glm::vec2 SizeOffset{ 0.0f,0.0f };
+    glm::vec2 Location{ 0.0f,0.0f };
+    glm::vec2 LocationOffset{ 0.0f,0.0f };
+    glm::vec2 Scale{ 1.0f,1.0f };
+    float rotation = 0.0f;
+    std::function<void()> Tick = []() {};
+    UIElement(std::string name, glm::vec2 Location, glm::vec2 Size, glm::vec4 BackgroundColor) {
+        this->name = name;
+        this->Location = Location;
+        this->Size = Size;
+        this->BackgroundColor = BackgroundColor;
+    }
+    
+
+};
+
+std::vector<UIElement> UI;
+
 
 class Player {
 public:
@@ -509,182 +604,53 @@ void UploadChunk(chunk* ch) {
                 if (s1 && s2) return 0; return 3 - (s1 + s2 + c);
             };
 
-        AO[0][0] = CalculateAO(
-            { 0, 0, 1 },
-            { -1, 0, 0 },
-            { 0, -1, 0 },
-            { -1, -1, 0 }
-        );
+        
 
-        AO[0][1] = CalculateAO(
-            { 0, 0, 1 },
-            { 1, 0, 0 },
-            { 0, -1, 0 },
-            { 1, -1, 0 }
-        );
-
-        AO[0][2] = CalculateAO(
-            { 0, 0, 1 },
-            { 1, 0, 0 },
-            { 0, 1, 0 },
-            { 1, 1, 0 }
-        );
-
-        AO[0][3] = CalculateAO(
-            { 0, 0, 1 },
-            { -1, 0, 0 },
-            { 0, 1, 0 },
-            { -1, 1, 0 }
-        );
+        
 
 
-        AO[1][0] = CalculateAO(
-            { 0, 0, -1 },
-            { 1, 0, 0 },
-            { 0, -1, 0 },
-            { 1, -1, 0 }
-        );
-
-        AO[1][1] = CalculateAO(
-            { 0, 0, -1 },
-            { -1, 0, 0 },
-            { 0, -1, 0 },
-            { -1, -1, 0 }
-        );
-
-        AO[1][2] = CalculateAO(
-            { 0, 0, -1 },
-            { -1, 0, 0 },
-            { 0, 1, 0 },
-            { -1, 1, 0 }
-        );
-
-        AO[1][3] = CalculateAO(
-            { 0, 0, -1 },
-            { 1, 0, 0 },
-            { 0, 1, 0 },
-            { 1, 1, 0 }
-        );
+        
 
 
-        AO[2][0] = CalculateAO(
-            { -1, 0, 0 },
-            { 0, 0, -1 },
-            { 0, -1, 0 },
-            { 0, -1, -1 }
-        );
+        
 
-        AO[2][1] = CalculateAO(
-            { -1, 0, 0 },
-            { 0, 0, 1 },
-            { 0, -1, 0 },
-            { 0, -1, 1 }
-        );
-
-        AO[2][2] = CalculateAO(
-            { -1, 0, 0 },
-            { 0, 0, 1 },
-            { 0, 1, 0 },
-            { 0, 1, 1 }
-        );
-
-        AO[2][3] = CalculateAO(
-            { -1, 0, 0 },
-            { 0, 0, -1 },
-            { 0, 1, 0 },
-            { 0, 1, -1 }
-        );
+        
 
 
-        AO[3][0] = CalculateAO(
-            { 1, 0, 0 },
-            { 0, 0, 1 },
-            { 0, -1, 0 },
-            { 0, -1, 1 }
-        );
+        
 
-        AO[3][1] = CalculateAO(
-            { 1, 0, 0 },
-            { 0, 0, -1 },
-            { 0, -1, 0 },
-            { 0, -1, -1 }
-        );
-
-        AO[3][2] = CalculateAO(
-            { 1, 0, 0 },
-            { 0, 0, -1 },
-            { 0, 1, 0 },
-            { 0, 1, -1 }
-        );
-
-        AO[3][3] = CalculateAO(
-            { 1, 0, 0 },
-            { 0, 0, 1 },
-            { 0, 1, 0 },
-            { 0, 1, 1 }
-        );
-
-
-        AO[4][0] = CalculateAO(
-            { 0, 1, 0 },
-            { -1, 0, 0 },
-            { 0, 0, 1 },
-            { -1, 0, 1 }
-        );
-
-        AO[4][1] = CalculateAO(
-            { 0, 1, 0 },
-            { 1, 0, 0 },
-            { 0, 0, 1 },
-            { 1, 0, 1 }
-        );
-
-        AO[4][2] = CalculateAO(
-            { 0, 1, 0 },
-            { 1, 0, 0 },
-            { 0, 0, -1 },
-            { 1, 0, -1 }
-        );
-
-        AO[4][3] = CalculateAO(
-            { 0, 1, 0 },
-            { -1, 0, 0 },
-            { 0, 0, -1 },
-            { -1, 0, -1 }
-        );
-
-        AO[5][0] = CalculateAO(
-            { 0, -1, 0 },
-            { -1, 0, 0 },
-            { 0, 0, -1 },
-            { -1, 0, -1 }
-        );
-
-        AO[5][1] = CalculateAO(
-            { 0, -1, 0 },
-            { 1, 0, 0 },
-            { 0, 0, -1 },
-            { 1, 0, -1 }
-        );
-
-        AO[5][2] = CalculateAO(
-            { 0, -1, 0 },
-            { 1, 0, 0 },
-            { 0, 0, 1 },
-            { 1, 0, 1 }
-        );
-
-        AO[5][3] = CalculateAO(
-            { 0, -1, 0 },
-            { -1, 0, 0 },
-            { 0, 0, 1 },
-            { -1, 0, 1 }
-        );
+        
 
 
 #pragma endregion
         //Front
         if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,1 }) == AIR) {
+            AO[0][0] = CalculateAO(
+                { 0, 0, 1 },
+                { -1, 0, 0 },
+                { 0, -1, 0 },
+                { -1, -1, 0 }
+            );
+            AO[0][1] = CalculateAO(
+                { 0, 0, 1 },
+                { 1, 0, 0 },
+                { 0, -1, 0 },
+                { 1, -1, 0 }
+            );
+
+            AO[0][2] = CalculateAO(
+                { 0, 0, 1 },
+                { 1, 0, 0 },
+                { 0, 1, 0 },
+                { 1, 1, 0 }
+            );
+
+            AO[0][3] = CalculateAO(
+                { 0, 0, 1 },
+                { -1, 0, 0 },
+                { 0, 1, 0 },
+                { -1, 1, 0 }
+            );
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, sX, sY, AO[0][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, sY, AO[0][1]);
@@ -696,6 +662,33 @@ void UploadChunk(chunk* ch) {
         }
         //Back
         if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,-1 }) == AIR) {
+            AO[1][0] = CalculateAO(
+                { 0, 0, -1 },
+                { 1, 0, 0 },
+                { 0, -1, 0 },
+                { 1, -1, 0 }
+            );
+
+            AO[1][1] = CalculateAO(
+                { 0, 0, -1 },
+                { -1, 0, 0 },
+                { 0, -1, 0 },
+                { -1, -1, 0 }
+            );
+
+            AO[1][2] = CalculateAO(
+                { 0, 0, -1 },
+                { -1, 0, 0 },
+                { 0, 1, 0 },
+                { -1, 1, 0 }
+            );
+
+            AO[1][3] = CalculateAO(
+                { 0, 0, -1 },
+                { 1, 0, 0 },
+                { 0, 1, 0 },
+                { 1, 1, 0 }
+            );
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, sX, sY, AO[1][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, eX, sY, AO[1][1]);
@@ -707,6 +700,34 @@ void UploadChunk(chunk* ch) {
         }
         //Left
         if (ch->GetBlockAt(pos + glm::ivec3{ -1,0,0 }) == AIR) {
+            AO[2][0] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, -1, 0 },
+                { 0, -1, -1 }
+            );
+
+            AO[2][1] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, -1, 0 },
+                { 0, -1, 1 }
+            );
+
+            AO[2][2] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, 1, 0 },
+                { 0, 1, 1 }
+            );
+
+            AO[2][3] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, 1, 0 },
+                { 0, 1, -1 }
+            );
+
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[2][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, eX, sY, AO[2][1]);
@@ -718,6 +739,33 @@ void UploadChunk(chunk* ch) {
         }
         //Right
         if (ch->GetBlockAt(pos + glm::ivec3{ 1,0,0 }) == AIR) {
+            AO[3][0] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, -1, 0 },
+                { 0, -1, 1 }
+            );
+
+            AO[3][1] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, -1, 0 },
+                { 0, -1, -1 }
+            );
+
+            AO[3][2] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, 1, 0 },
+                { 0, 1, -1 }
+            );
+
+            AO[3][3] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, 1, 0 },
+                { 0, 1, 1 }
+            );
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, sX, sY, AO[3][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[3][1]);
@@ -729,6 +777,33 @@ void UploadChunk(chunk* ch) {
         }
         //Top
         if (ch->GetBlockAt(pos + glm::ivec3{ 0,1,0 }) == AIR) {
+            AO[4][0] = CalculateAO(
+                { 0, 1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { -1, 0, 1 }
+            );
+
+            AO[4][1] = CalculateAO(
+                { 0, 1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 1, 0, 1 }
+            );
+
+            AO[4][2] = CalculateAO(
+                { 0, 1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 1, 0, -1 }
+            );
+
+            AO[4][3] = CalculateAO(
+                { 0, 1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { -1, 0, -1 }
+            );
             Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, sY, AO[4][0]),
                 vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, sY, AO[4][1]);
@@ -740,6 +815,33 @@ void UploadChunk(chunk* ch) {
         }
         //Bottom
         if (ch->GetBlockAt(pos + glm::ivec3{ 0,-1,0 }) == AIR) {
+            AO[5][0] = CalculateAO(
+                { 0, -1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { -1, 0, -1 }
+            );
+
+            AO[5][1] = CalculateAO(
+                { 0, -1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 1, 0, -1 }
+            );
+
+            AO[5][2] = CalculateAO(
+                { 0, -1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 1, 0, 1 }
+            );
+
+            AO[5][3] = CalculateAO(
+                { 0, -1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { -1, 0, 1 }
+            );
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[5][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[5][1]);
@@ -764,7 +866,7 @@ void UploadChunk(chunk* ch) {
             vertices.push_back(vert);
         }
 
-        for (uint i = 0; i < Blockvertices.size(); i += 4) {
+        for (uint i = 0; i < vertexCount; i += 4) {
             indices.push_back(offset + i + 0);
             indices.push_back(offset + i + 1);
             indices.push_back(offset + i + 2);
@@ -852,7 +954,7 @@ bool ChunkGenerated(ChunkPos position) {
 void movement(float deltaTime);
 float pitch = 0.0f;
 float yaw = 0.0f;
-int WIDTH=1920/2, HEIGHT=1080/2;
+int WIDTH=0, HEIGHT=0;
 void resize(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
     WIDTH = width;
@@ -862,6 +964,8 @@ void mouseMove(GLFWwindow* window, double xpos, double ypos) {
     static float lastX = xpos;
     static float lastY = ypos;
     static bool firstMouse = true;
+    mx = xpos;
+    my = ypos;
 
     if (firstMouse)
     {
@@ -1030,6 +1134,28 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
         }
 
     }
+    else if (key == GLFW_KEY_F4 && action == GLFW_PRESS) {
+        yaw = std::round(yaw / 90.0f) * 90.0f;
+        pitch = std::round(pitch / 90.0f) * 90.0f;
+
+        pitch = glm::clamp(pitch, -89.0f, 89.0f);
+
+        player.cam.front.x =
+            cos(glm::radians(yaw)) *
+            cos(glm::radians(pitch));
+
+        player.cam.front.y =
+            sin(glm::radians(pitch));
+
+        player.cam.front.z =
+            sin(glm::radians(yaw)) *
+            cos(glm::radians(pitch));
+
+        player.cam.front = glm::normalize(player.cam.front);
+
+        
+
+    }
 }
 void LoadChunks() {
     glm::vec3 plposdiv = player.position / 16.0f;
@@ -1093,6 +1219,7 @@ void LoadChunks() {
 }
 GLFWwindow* window;
 uint HighLightVAO;
+uint MenuVAO;
 void ScreenShot();
 int main()
 {
@@ -1100,7 +1227,9 @@ int main()
     if (!glfwInit()) {
         return -1;
     }
-    window = glfwCreateWindow(960, 540, "MeinKampf", NULL, NULL);
+    window = glfwCreateWindow(960, 540, "MeinKampf", NULL, NULL);//960 540
+
+    glfwGetWindowSize(window, &WIDTH, &HEIGHT);
     glfwMakeContextCurrent(window);
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         return -1;
@@ -1150,6 +1279,89 @@ int main()
     }
 
 
+    //simple shader (menu cube)
+
+    {
+        uint VS = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(VS, 1, &SimpleVertexSource, NULL);
+        glCompileShader(VS);
+        {
+            int success;
+            glGetShaderiv(VS, GL_COMPILE_STATUS, &success);
+            if (!success) {
+                char log[512];
+                glGetShaderInfoLog(VS, 512, nullptr, log);
+                std::cout << "VERTEX SHADER ERROR: " << log;
+            }
+
+        }
+
+
+        uint FS = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(FS, 1, &SimpleFragmentSource, NULL);
+        glCompileShader(FS);
+        {
+            int success;
+            glGetShaderiv(FS, GL_COMPILE_STATUS, &success);
+            if (!success) {
+                char log[512];
+                glGetShaderInfoLog(FS, 512, nullptr, log);
+                std::cout << "FRAGMENT SHADER ERROR: " << log;
+            }
+
+        }
+
+        SimpleShaderProgram = glCreateProgram();
+        glAttachShader(SimpleShaderProgram, VS);
+        glAttachShader(SimpleShaderProgram, FS);
+        glLinkProgram(SimpleShaderProgram);
+
+        glDeleteShader(VS);
+        glDeleteShader(FS);
+
+    }
+    //UI SHADER PROGRAM
+    {
+        uint VS = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(VS, 1, &UIVertexSource, NULL);
+        glCompileShader(VS);
+        {
+            int success;
+            glGetShaderiv(VS, GL_COMPILE_STATUS, &success);
+            if (!success) {
+                char log[512];
+                glGetShaderInfoLog(VS, 512, nullptr, log);
+                std::cout << "VERTEX SHADER ERROR: " << log;
+            }
+
+        }
+
+
+        uint FS = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(FS, 1, &UIFragmentSource, NULL);
+        glCompileShader(FS);
+        {
+            int success;
+            glGetShaderiv(FS, GL_COMPILE_STATUS, &success);
+            if (!success) {
+                char log[512];
+                glGetShaderInfoLog(FS, 512, nullptr, log);
+                std::cout << "FRAGMENT SHADER ERROR: " << log;
+            }
+
+        }
+
+        UIShaderProgram = glCreateProgram();
+        glAttachShader(UIShaderProgram, VS);
+        glAttachShader(UIShaderProgram, FS);
+        glLinkProgram(UIShaderProgram);
+
+        glDeleteShader(VS);
+        glDeleteShader(FS);
+
+    }
+
+
     //Block highligh shader
     {
         uint VS = glCreateShader(GL_VERTEX_SHADER);
@@ -1180,37 +1392,117 @@ int main()
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
-   /* glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);*/
+   
 
-    glViewport(0, 0, 960, 540);
+    glViewport(0, 0, WIDTH, HEIGHT);
     glClearColor(66.0f / 255.0f, 135.0f / 255.0f, 245.0f / 255.0f, 1.0f);
 
 
 #pragma region Load Texture Atlas
-    stbi_set_flip_vertically_on_load(true);
-    int width, height, channels;
-    const unsigned char* data = stbi_load("assets/block.png", &width, &height, &channels, 4);
+    {
+        stbi_set_flip_vertically_on_load(true);
+        int width, height, channels;
+        const unsigned char* data = stbi_load("assets/block.png", &width, &height, &channels, 4);
 
 
-    glGenTextures(1, &ATLAS);
-    glBindTexture(GL_TEXTURE_2D, ATLAS);
+        glGenTextures(1, &ATLAS);
+        glBindTexture(GL_TEXTURE_2D, ATLAS);
 
-    glTexImage2D(GL_TEXTURE_2D, NULL, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        glTexImage2D(GL_TEXTURE_2D, NULL, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-        GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            GL_NEAREST);
 
-    //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, -1.5f);
+        //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, -1.5f);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glGenerateMipmap(GL_TEXTURE_2D);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+
+#pragma endregion
+
+#pragma region Load UI Atlas
+    {
+        stbi_set_flip_vertically_on_load(false);
+        int width, height, channels;
+        const unsigned char* data = stbi_load("assets/ui.png", &width, &height, &channels, 4);
+
+
+        glGenTextures(1, &UITEXTURE);
+        glBindTexture(GL_TEXTURE_2D, UITEXTURE);
+
+        glTexImage2D(GL_TEXTURE_2D, NULL, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            GL_NEAREST);
+
+        //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, -1.5f);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
 
 
 #pragma endregion
+
+#pragma region Load Subtitles Atlas
+    {
+        stbi_set_flip_vertically_on_load(false);
+        int width, height, channels;
+        const unsigned char* data = stbi_load("assets/subtitles.png", &width, &height, &channels, 4);
+
+
+        glGenTextures(1, &SUBTITLES_TEXTURE);
+        glBindTexture(GL_TEXTURE_2D, SUBTITLES_TEXTURE);
+
+        glTexImage2D(GL_TEXTURE_2D, NULL, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            GL_NEAREST);
+
+        //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, -1.5f);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+
+
+#pragma endregion
+
+#pragma region Load Menu Background
+    stbi_set_flip_vertically_on_load(true);
+    {
+        int w, h, c;
+        const unsigned char* ddata = stbi_load("assets/menubg.png", &w, &h, &c, 4);
+
+
+        glGenTextures(1, &MENU_BG);
+        glBindTexture(GL_TEXTURE_2D, MENU_BG);
+
+        glTexImage2D(GL_TEXTURE_2D, NULL, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, ddata);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            GL_LINEAR);
+
+        //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, -1.5f);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+        //glGenerateMipmap(GL_TEXTURE_2D);
+    }
+#pragma endregion
+
 
 #pragma region Create Highlight VAO
     {
@@ -1287,7 +1579,127 @@ int main()
 #pragma endregion
 
 
+#pragma region Create Menu Background Cube
+    {
+        float frac = 1.0f / 6.0f;
+        std::vector<vertex> Blockvertices = {
+            //Front
+            vertex(-0.5f, -0.5f,  0.5f, 0.0f, 0.0f),
+            vertex(0.5f,  0.5f,  0.5f, frac, 1.0f),
+            vertex(-0.5f,  0.5f,  0.5f, 0.0f, 1.0f),
 
+            vertex(-0.5f, -0.5f,  0.5f, 0.0f, 0.0f),
+            vertex(0.5f, -0.5f,  0.5f, frac, 0.0f),
+            vertex(0.5f,  0.5f,  0.5f, frac, 1.0f),
+
+            //Back
+            vertex(0.5f, -0.5f, -0.5f, frac*2, 0.0f),
+            vertex(-0.5f,  0.5f, -0.5f, frac*3, 1.0f),
+            vertex(0.5f,  0.5f, -0.5f, frac*2, 1.0f),
+
+            vertex(0.5f, -0.5f, -0.5f, frac*2, 0.0f),
+            vertex(-0.5f, -0.5f, -0.5f, frac*3, 0.0f),
+            vertex(-0.5f,  0.5f, -0.5f, frac*3, 1.0f),
+
+            //Left
+            vertex(-0.5f, -0.5f, -0.5f, frac*3, 0.0f),
+            vertex(-0.5f,  0.5f,  0.5f, frac*4, 1.0f),
+            vertex(-0.5f,  0.5f, -0.5f, frac*3, 1.0f),
+
+            vertex(-0.5f, -0.5f, -0.5f, frac*3, 0.0f),
+            vertex(-0.5f, -0.5f,  0.5f, frac*4, 0.0f),
+            vertex(-0.5f,  0.5f,  0.5f, frac*4, 1.0f),
+
+            //Right
+            vertex(0.5f, -0.5f,  0.5f, frac, 0.0f),
+            vertex(0.5f,  0.5f, -0.5f, frac*2, 1.0f),
+            vertex(0.5f,  0.5f,  0.5f, frac, 1.0f),
+
+            vertex(0.5f, -0.5f,  0.5f, frac, 0.0f),
+            vertex(0.5f, -0.5f, -0.5f, frac*2, 0.0f),
+            vertex(0.5f,  0.5f, -0.5f, frac*2, 1.0f),
+
+            //Top
+            vertex(-0.5f,  0.5f,  0.5f, frac*4, 0.0f),
+            vertex(0.5f,  0.5f, -0.5f, frac*5, 1.0f),
+            vertex(-0.5f,  0.5f, -0.5f, frac*4, 1.0f),
+
+            vertex(-0.5f,  0.5f,  0.5f, frac*4, 0.0f),
+            vertex(0.5f,  0.5f,  0.5f, frac*5, 0.0f),
+            vertex(0.5f,  0.5f, -0.5f, frac*5, 1.0f),
+
+            //Bottom
+            vertex(-0.5f, -0.5f, -0.5f, frac*5, 0.0f),
+            vertex(0.5f, -0.5f,  0.5f, frac*5, 1.0f),
+            vertex(-0.5f, -0.5f,  0.5f, frac*5, 1.0f),
+
+            vertex(-0.5f, -0.5f, -0.5f, frac*5, 0.0f),
+            vertex(0.5f, -0.5f, -0.5f, frac*6, 0.0f),
+            vertex(0.5f, -0.5f,  0.5f, frac*6, 1.0f)
+        };
+
+        uint vbo;
+        glGenVertexArrays(1, &MenuVAO);
+        glGenBuffers(1, &vbo);
+
+        glBindVertexArray(MenuVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+        glBufferData(GL_ARRAY_BUFFER, Blockvertices.size() * sizeof(vertex), Blockvertices.data(), GL_STATIC_DRAW);
+        //pos
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+        //uv
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3*sizeof(float)));
+
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+
+
+
+    }
+    #pragma endregion
+
+#pragma region Create UI VAO
+    {
+        
+        std::vector<vertex> SquareVerts = {
+            vertex(-0.5f, -0.5f,  0.0f, 0.0f, 0.0f),
+            vertex(0.5f,  0.5f,  0.0f, 1.0f, 1.0f),
+            vertex(-0.5f,  0.5f,  0.0f, 0.0f, 1.0f),
+
+            vertex(-0.5f, -0.5f,  0.0f, 0.0f, 0.0f),
+            vertex(0.5f, -0.5f,  0.0f, 1.0f, 0.0f),
+            vertex(0.5f,  0.5f,  0.0f, 1.0f, 1.0f),
+
+          
+        };
+
+        uint vbo;
+        glGenVertexArrays(1, &UIVAO);
+        glGenBuffers(1, &vbo);
+
+        glBindVertexArray(UIVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+        glBufferData(GL_ARRAY_BUFFER, SquareVerts.size() * sizeof(vertex), SquareVerts.data(), GL_STATIC_DRAW);
+        //pos
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+        //uv
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3 * sizeof(float)));
+
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+#pragma endregion
+
+
+
+    
 
     float lasttime = 0.0f;
     //chunk TESTCHUNK;
@@ -1295,8 +1707,107 @@ int main()
 
     //TESTCHUNK.Generate();
 
+    float menurotation = 0.0f;
+    uint mvplocc = glGetUniformLocation(SimpleShaderProgram, "MVP");
+    uint uimvploc = glGetUniformLocation(UIShaderProgram, "MVP");
+    uint texturelocc = glGetUniformLocation(SimpleShaderProgram, "texture0");
+    uint uitextureloc = glGetUniformLocation(UIShaderProgram, "texture0");
+    uint uiusetextureloc = glGetUniformLocation(UIShaderProgram, "useTexture");
+    uint uiuvloc = glGetUniformLocation(UIShaderProgram, "texcoord");
+
+
+    //CREATE UI
+    UI.reserve(100);
+    UIElement* startButton = &UI.emplace_back("StartGame", glm::vec2{ 0.5,0.5 }, glm::vec2{ 0.0,0.0 }, glm::vec4{ 0.0 });
+    startButton->SizeOffset = glm::vec2{ 200,20 }*3.0f;
+    startButton->AnchorPoint = { 0.5f,0.5f };
+    startButton->TextureLocation = { 0.0f,106.0f };
+    startButton->TextureSize = { 200.0f,20.0f };
+    startButton->useTexture = true;
+    startButton->Tick = [startButton]() {
+        if (GAME_STATE == MENU) {
+            static bool clicked = false;
+            auto localsize = glm::vec2(startButton->Size * glm::vec2(static_cast<float>(WIDTH), static_cast<float>(HEIGHT)) + startButton->SizeOffset) - startButton->AnchorPoint;
+
+            auto localpos = glm::vec2(startButton->Location * glm::vec2(static_cast<float>(WIDTH), static_cast<float>(HEIGHT)) + startButton->LocationOffset) - startButton->AnchorPoint * localsize;
+
+            if (mx >= localpos.x && mx <= localpos.x + localsize.x && my >= localpos.y && my <= localpos.y + localsize.y) {
+                //hover
+                if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1)) {
+                    if (!clicked) {
+                        clicked = true;
+                        GAME_STATE = INGAME;
+                        startButton->visible = false;
+
+                    }
+                }
+                else {
+                    clicked = false;
+                }
+
+                startButton->TextureLocation = { 0.0f,126.0f };
+            }
+            else {
+                startButton->TextureLocation = { 0.0f,106.0f };
+
+            }
+        }
+        else {
+            startButton->visible = false;
+        }
+        };
+
+    UIElement* Title = &UI.emplace_back("Title", glm::vec2{ 0.5,0.5 }, glm::vec2{ 0.0,0.0 }, glm::vec4{ 0.0 });
+    Title->Size = glm::vec2{ 0.0f,0.0f };
+    Title->SizeOffset = glm::vec2{ 512,140 }*1.5f;
+    Title->AnchorPoint = { 0.5,0.5 };
+    Title->Location = glm::vec2{ 0.5f,0.2f };
+    //Title->LocationOffset = glm::vec2{ 0.0f,150.0f };
+    Title->TextureLocation = { 0.0f,372.0f };
+    Title->TextureSize = { 512.0f,140.0f};
+    Title->useTexture = true;
+    Title->Tick = [Title]() {
+        if (GAME_STATE == MENU) {
+            Title->Scale = glm::vec2{ static_cast<float>(WIDTH) / 960.0f };
+            Title->rotation = sin(glfwGetTime()) * 2.0f;
+        }
+        else {
+            Title->visible = false;
+        }
+        
+        };
+
+
+    UIElement SubTitle = UIElement("SubTitle", glm::vec2{ 0.5,0.5 }, glm::vec2{ 0.0,0.0 }, glm::vec4{ 0.0 });
+    SubTitle.Size = glm::vec2{ 0.0f,0.0f };
+    SubTitle.SizeOffset = glm::vec2{ 512,30.0f }*1.5f;
+    SubTitle.AnchorPoint = { 0.5,0.5 };
+    SubTitle.Location = glm::vec2{ 0.8f,0.2f };
+    SubTitle.LocationOffset = glm::vec2{ 150.0f,-150.0f };
+    SubTitle.rotation = -45.0f;
+    //Title->LocationOffset = glm::vec2{ 0.0f,150.0f };
+    float subtitle = static_cast<int>(RandomNumber(0.0f, 10.0f));
+
+    SubTitle.TextureLocation = { 0.0f,(30.0f) * subtitle };
     
+    SubTitle.TextureSize = { 512.0f,30.0f };
+    SubTitle.useTexture = true;
     
+    SubTitle.Tick = [&]() {
+        if (GAME_STATE == MENU) {
+            SubTitle.Scale = glm::vec2{ static_cast<float>(WIDTH) / 960.0f };
+            
+        }
+       
+
+        };
+
+
+
+
+
+
+
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
@@ -1304,129 +1815,337 @@ int main()
             continue;
         }
         glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-        if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1)) {
-            mouseLocked = true;
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        }
+        glEnable(GL_DEPTH_TEST);
+        
         float time = glfwGetTime();
         float deltaTime = time - lasttime;
         lasttime = time;
-        player.tick();
-        movement(deltaTime);
-        LoadChunks();
-        int width, height;
-        glfwGetWindowSize(window, &width, &height);
-        player.cam.FOV +=
-            (player.cam.TargetFOV * player.cam.FOV_Multiplier - player.cam.FOV)
-            * 5.0f * deltaTime;
-        glm::mat4 projection = glm::perspective(glm::radians(player.cam.FOV), static_cast<float>(width) / static_cast<float>(height), 0.1f, 1000.0f);
-        glm::mat4 view = glm::lookAt(player.position + player.cam.position, player.position + player.cam.position + player.cam.front, player.cam.up);
-        glUseProgram(ShaderProgram);
+        if (GAME_STATE == INGAME) {
+            if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1)) {
+                mouseLocked = true;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            }
+            glEnable(GL_CULL_FACE);
+            player.tick();
+            movement(deltaTime);
 
-        uint mvploc = glGetUniformLocation(ShaderProgram, "MVP");
-        uint textureloc = glGetUniformLocation(ShaderProgram, "texture0");
+            LoadChunks();
+            int width, height;
+            glfwGetWindowSize(window, &width, &height);
+            player.cam.FOV +=
+                (player.cam.TargetFOV * player.cam.FOV_Multiplier - player.cam.FOV)
+                * 5.0f * deltaTime;
+            if (glfwGetKey(window, GLFW_KEY_F6)) {
+                player.cam.FOV = 80.0f;
+            }
+            glm::mat4 projection = glm::perspective(glm::radians(player.cam.FOV), static_cast<float>(width) / static_cast<float>(height), 0.1f, 1000.0f);
+            glm::mat4 view = glm::lookAt(player.position + player.cam.position, player.position + player.cam.position + player.cam.front, player.cam.up);
+            glUseProgram(ShaderProgram);
 
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, ATLAS);
-        glUniform1i(textureloc, 0);
-
-        //TESTCHUNK.Render();
-
-        glm::vec3 plposdiv = player.position / 16.0f;
-        for (int x = plposdiv.x - player.RenderDistance;x < plposdiv.x + player.RenderDistance;x++) {
-            for (int z = plposdiv.z - player.RenderDistance;z < plposdiv.z + player.RenderDistance;z++) {
-                if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
-                    //genchunk
-                    ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
-                    if (ChunkPool.count(cp)) {
-                        glm::mat4 model(1.0f);
-                        model = glm::translate(model, glm::vec3(cp.x, 0.0f, cp.z) * 16.0f);
-                        glm::mat4 MVP = projection * view * model;
-                        glUniformMatrix4fv(mvploc, 1, GL_FALSE, glm::value_ptr(MVP));
-                        ChunkPool.at(cp).Render();
+            uint mvploc = glGetUniformLocation(ShaderProgram, "MVP");
+            uint textureloc = glGetUniformLocation(ShaderProgram, "texture0");
 
 
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, ATLAS);
+            glUniform1i(textureloc, 0);
+
+            //TESTCHUNK.Render();
+
+            glm::vec3 plposdiv = player.position / 16.0f;
+            for (int x = plposdiv.x - player.RenderDistance;x < plposdiv.x + player.RenderDistance;x++) {
+                for (int z = plposdiv.z - player.RenderDistance;z < plposdiv.z + player.RenderDistance;z++) {
+                    if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
+                        //genchunk
+                        ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
+                        if (ChunkPool.count(cp)) {
+                            glm::mat4 model(1.0f);
+                            model = glm::translate(model, glm::vec3(cp.x, 0.0f, cp.z) * 16.0f);
+                            glm::mat4 MVP = projection * view * model;
+                            glUniformMatrix4fv(mvploc, 1, GL_FALSE, glm::value_ptr(MVP));
+                            ChunkPool.at(cp).Render();
+
+
+                        }
                     }
+
                 }
 
             }
 
-        }
-
-        //block highlights
-        float dist = 0.0f;
-        float step = 0.1f;
-        mvploc2 = glGetUniformLocation(HighlightShaderProgram, "MVP");
-        glUseProgram(HighlightShaderProgram);
-        ChunkPos Hchunk(0,0);
-        glm::ivec3 localpos(0,0,0);
-        glm::ivec3 hitBlock;
-        glm::ivec3 previousBlock(0,0,0);
-        bool hitblock = false;
-        while (dist <= player.reach)
-        {
-            glm::vec3 ray =
-                player.position +
-                player.cam.position +
-                player.cam.front * dist;
-
-            glm::ivec3 blockPos = glm::ivec3(
-                glm::floor(ray + glm::vec3(0.5f))
-            );
-
-            ChunkPos cp(
-                static_cast<int>(glm::floor(blockPos.x / 16.0f)),
-                static_cast<int>(glm::floor(blockPos.z / 16.0f))
-            );
-
-            glm::ivec3 local(
-                blockPos.x - cp.x * 16,
-                blockPos.y,
-                blockPos.z - cp.z * 16
-            );
-
-            if (ChunkPool.count(cp) &&
-                ChunkPool.at(cp).GetBlockAt(local) != AIR)
+            //block highlights
+            float dist = 0.0f;
+            float step = 0.1f;
+            mvploc2 = glGetUniformLocation(HighlightShaderProgram, "MVP");
+            glUseProgram(HighlightShaderProgram);
+            ChunkPos Hchunk(0, 0);
+            glm::ivec3 localpos(0, 0, 0);
+            glm::ivec3 hitBlock;
+            glm::ivec3 previousBlock(0, 0, 0);
+            bool hitblock = false;
+            while (dist <= player.reach)
             {
-                localpos = local;
-                Hchunk = cp;
-                hitBlock = blockPos;
-                hitblock = true;
-                break;
-            }
-            previousBlock = blockPos;
-            dist += step;
-        }
-        glBindVertexArray(HighLightVAO);
+                glm::vec3 ray =
+                    player.position +
+                    player.cam.position +
+                    player.cam.front * dist;
 
-        glm::vec3 blockWorldPos(
-            Hchunk.x * 16.0f + localpos.x,
-            localpos.y,
-            Hchunk.z * 16.0f + localpos.z
+                glm::ivec3 blockPos = glm::ivec3(
+                    glm::floor(ray + glm::vec3(0.5f))
+                );
+
+                ChunkPos cp(
+                    static_cast<int>(glm::floor(blockPos.x / 16.0f)),
+                    static_cast<int>(glm::floor(blockPos.z / 16.0f))
+                );
+
+                glm::ivec3 local(
+                    blockPos.x - cp.x * 16,
+                    blockPos.y,
+                    blockPos.z - cp.z * 16
+                );
+
+                if (ChunkPool.count(cp) &&
+                    ChunkPool.at(cp).GetBlockAt(local) != AIR)
+                {
+                    localpos = local;
+                    Hchunk = cp;
+                    hitBlock = blockPos;
+                    hitblock = true;
+                    break;
+                }
+                previousBlock = blockPos;
+                dist += step;
+            }
+            glBindVertexArray(HighLightVAO);
+
+            glm::vec3 blockWorldPos(
+                Hchunk.x * 16.0f + localpos.x,
+                localpos.y,
+                Hchunk.z * 16.0f + localpos.z
+            );
+
+            glm::mat4 model(1.0f);
+            model = glm::translate(model, blockWorldPos);
+            model = glm::scale(model, glm::vec3(1.005f, 1.005f, 1.005f));
+            glm::mat4 MVP = projection * view * model;
+            if (hitblock) {
+                glUniformMatrix4fv(mvploc2, 1, GL_FALSE, glm::value_ptr(MVP));
+                glLineWidth(2.0f);
+                glDrawArrays(GL_LINES, 0, 32);
+            }
+            //test
+            //DrawAABB(player.box.min+player.box.position, player.box.max+player.box.position, projection * view);
+            if (screenshottimer > 0.0f) {
+                screenshottimer -= deltaTime;
+            }
+            if (DoScreenshot && screenshottimer <= 0.0f) {
+                ScreenShot();
+            }
+
+            
+        }
+else if(GAME_STATE==MENU) {
+    glBindVertexArray(MenuVAO);
+    glDisable(GL_CULL_FACE);
+    glm::mat4 projection = glm::perspective(glm::radians(60.0f), static_cast<float>(WIDTH) / static_cast<float>(HEIGHT), 0.1f, 1000.0f);
+    glm::mat4 view = glm::lookAt(glm::vec3{0.0f}, glm::vec3{ 0.0f,0.0f,-1.0f }, glm::vec3{ 0.0f,1.0f,0.0f });
+    glUseProgram(SimpleShaderProgram);
+
+    
+
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, MENU_BG);
+    glUniform1i(texturelocc, 0);
+
+    glm::mat4 model(1.0f);
+    menurotation += deltaTime*3.0f;
+    
+    //brb
+    model = glm::rotate(
+        model,
+        glm::radians(menurotation),
+        glm::vec3(0.0f, 1.0f, 0.0f)
+    );
+    
+
+    model = glm::scale(
+        model,
+        glm::vec3(4.0f)
+    );
+
+    glm::mat4 MVP = projection * view * model;
+    glUniformMatrix4fv(mvplocc, 1, GL_FALSE, glm::value_ptr(MVP));
+
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+
+
+
+    
+}
+//draw GUI
+glBindVertexArray(UIVAO);
+glUseProgram(UIShaderProgram);
+glDisable(GL_DEPTH_TEST);
+glDisable(GL_CULL_FACE);
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+glm::mat4 proj = glm::ortho(0.0f,static_cast<float>(WIDTH),static_cast<float>(HEIGHT),0.0f);
+glActiveTexture(GL_TEXTURE0);
+glBindTexture(GL_TEXTURE_2D, UITEXTURE);
+for (auto& gui : UI)
+{
+    if (!gui.visible)
+        continue;
+    gui.Tick();
+
+    glm::vec2 size =
+        gui.SizeOffset +
+        gui.Size * glm::vec2(
+            (float)WIDTH,
+            (float)HEIGHT
         );
 
+    glm::vec2 position =
+        gui.LocationOffset +
+        gui.Location * glm::vec2(
+            (float)WIDTH,
+            (float)HEIGHT
+        );
+
+    glm::vec2 anchor = gui.AnchorPoint - glm::vec2(0.5f);
+
+    glm::mat4 model(1.0f);
+
+    model = glm::translate(
+        model,
+        glm::vec3(position, 0.0f)
+    );
+
+    model = glm::rotate(
+        model,
+        glm::radians(gui.rotation),
+        glm::vec3(0, 0, 1)
+    );
+
+    
+
+    model = glm::scale(
+        model,
+        glm::vec3(size.x*gui.Scale.x, size.y * gui.Scale.y, 1.0f)
+    );
+
+    model = glm::translate(
+        model,
+        glm::vec3(-anchor.x, -anchor.y, 0.0f)
+    );
+    glUniform1i(uitextureloc, 0);
+    if (gui.useTexture) {
+        glUniform1i(uiusetextureloc, 1);
+        glUniform1i(uitextureloc, 0);
+        glUniform4fv(uiuvloc, 1, glm::value_ptr(glm::vec4(gui.TextureLocation.x/512.0f, gui.TextureLocation.y/512.0f, gui.TextureSize.x/512.0f, gui.TextureSize.y/512.0f)));
+    }
+    else {
+        glUniform1i(uiusetextureloc, 0);
+
+    }
+
+    glm::mat4 MVP = proj * model;
+
+    glUniformMatrix4fv(
+        uimvploc,
+        1,
+        GL_FALSE,
+        glm::value_ptr(MVP)
+    );
+
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+//render subtitles
+if (GAME_STATE == MENU) {
+    {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, SUBTITLES_TEXTURE);
+        auto& gui = SubTitle;
+        gui.Tick();
+
+        glm::vec2 size =
+            gui.SizeOffset +
+            gui.Size * glm::vec2(
+                (float)WIDTH,
+                (float)HEIGHT
+            );
+
+        glm::vec2 position =
+            gui.LocationOffset +
+            gui.Location * glm::vec2(
+                (float)WIDTH,
+                (float)HEIGHT
+            );
+
+        glm::vec2 anchor = gui.AnchorPoint - glm::vec2(0.5f);
+
         glm::mat4 model(1.0f);
-        model = glm::translate(model, blockWorldPos);
-        model = glm::scale(model, glm::vec3(1.005f, 1.005f, 1.005f));
-        glm::mat4 MVP = projection * view * model;
-        if (hitblock) {
-            glUniformMatrix4fv(mvploc2, 1, GL_FALSE, glm::value_ptr(MVP));
-            glLineWidth(2.0f);
-            glDrawArrays(GL_LINES, 0, 32);
+
+        model = glm::translate(
+            model,
+            glm::vec3(position, 0.0f)
+        );
+
+        model = glm::rotate(
+            model,
+            glm::radians(gui.rotation),
+            glm::vec3(0, 0, 1)
+        );
+
+
+
+        model = glm::scale(
+            model,
+            glm::vec3(size.x * gui.Scale.x, size.y * gui.Scale.y, 1.0f)
+        );
+
+        model = glm::translate(
+            model,
+            glm::vec3(-anchor.x, -anchor.y, 0.0f)
+        );
+        glUniform1i(uitextureloc, 0);
+        if (gui.useTexture) {
+            glUniform1i(uiusetextureloc, 1);
+            glUniform1i(uitextureloc, 0);
+            glUniform4fv(uiuvloc, 1, glm::value_ptr(glm::vec4(gui.TextureLocation.x / 512.0f, gui.TextureLocation.y / 512.0f, gui.TextureSize.x / 512.0f, gui.TextureSize.y / 512.0f)));
         }
-        //test
-        //DrawAABB(player.box.min+player.box.position, player.box.max+player.box.position, projection * view);
-        if (screenshottimer > 0.0f) {
-            screenshottimer -= deltaTime;
-        }
-        if (DoScreenshot&&screenshottimer<=0.0f) {
-            ScreenShot();
+        else {
+            glUniform1i(uiusetextureloc, 0);
+
         }
 
-        glfwSwapBuffers(window);
-        
+        glm::mat4 MVP = proj * model;
+
+        glUniformMatrix4fv(
+            uimvploc,
+            1,
+            GL_FALSE,
+            glm::value_ptr(MVP)
+        );
+
+
+        glDrawArrays(GL_TRIANGLES, 0, 6);
     }
+}
+
+
+
+glDisable(GL_BLEND);
+
+
+
+        glfwSwapBuffers(window);
+    }
+
 }
 bool CollidesWithBlocks(const AABB& box)
 {
