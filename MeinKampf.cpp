@@ -29,6 +29,7 @@ std::uniform_real_distribution<float> rnd;
 enum GameStates {
     MENU,WORLD_CHOOSE,INGAME
 };
+
 GameStates GAME_STATE=MENU;
 float RandomNumber(float min, float max) {
     return min + rnd(rd) * (max - min);
@@ -56,7 +57,8 @@ in float ao;
 uniform sampler2D texture0;
 void main(){
  float aoLevel = float(ao) / 3.0;
-aoLevel=min(1.0,aoLevel+0.2);
+aoLevel = mix(1.0, aoLevel, 0.8);
+aoLevel=min(1.0,aoLevel);
     FragColor = texture(texture0, TextCoord)*vec4(aoLevel, aoLevel, aoLevel, 1.0);
 //vec4(aoLevel, aoLevel, aoLevel, 1.0);
 
@@ -180,6 +182,32 @@ enum block {
     GOLD_ORE,
     DIAMOND_ORE,
     BEDROCK
+};
+struct BlockTextureMapping {
+    int TOP = 0, BOTTOM = 0, LEFT = 0, RIGHT = 0, FRONT = 0, BACK = 0;
+    BlockTextureMapping(int sides) {
+        TOP = sides;
+        BOTTOM = sides;
+        LEFT = sides;
+        RIGHT = sides;
+        FRONT = sides;
+        BACK = sides;
+    }
+    BlockTextureMapping(int Top, int Bottom, int Left, int Right, int Front, int Back) : TOP(Top), BOTTOM(Bottom), LEFT(Left), RIGHT(Right), FRONT(Front), BACK(Back) {
+
+    }
+};
+std::unordered_map<block, BlockTextureMapping> texturemappings = {
+    {STONE, {1}},
+    {COBBLE, {2}},
+    {DIRT, {3}},
+    {GRASS, {5,3,4,4,4,4}},
+    {COAL_ORE, {6}},
+    {IRON_ORE, {7}},
+    {GOLD_ORE, {8}},
+    {DIAMOND_ORE, {9}},
+    {BEDROCK, {10}},
+
 };
 int currentblock = 1;
 struct ChunkPos {
@@ -464,6 +492,43 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
 
     it->second.SetBlock(local, BlockType);
     it->second.dirty = true;
+
+    if (local.x > 14) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x+1) / 16.0f)),
+            static_cast<int>(floor(position.z / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
+    if (local.x < 2) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x - 1) / 16.0f)),
+            static_cast<int>(floor(position.z / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
+    if (local.z > 14) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x) / 16.0f)),
+            static_cast<int>(floor((position.z+1) / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
+    if (local.z < 2) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x) / 16.0f)),
+            static_cast<int>(floor((position.z - 1) / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
     
 }
 void GlobalBreakBlock(glm::ivec3 position) {
@@ -486,6 +551,43 @@ void GlobalBreakBlock(glm::ivec3 position) {
 
     it->second.RemoveBlock(local);
     it->second.dirty = true;
+
+    if (local.x > 14) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x + 1) / 16.0f)),
+            static_cast<int>(floor(position.z / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
+    if (local.x < 2) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x - 1) / 16.0f)),
+            static_cast<int>(floor(position.z / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
+    if (local.z > 14) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x) / 16.0f)),
+            static_cast<int>(floor((position.z + 1) / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
+    if (local.z < 2) {
+        ChunkPos cp2(
+            static_cast<int>(floor((position.x) / 16.0f)),
+            static_cast<int>(floor((position.z - 1) / 16.0f))
+        );
+        if (ChunkPool.count(cp2)) {
+            ChunkPool.at(cp2).dirty = true;
+        }
+    }
 
 }
 block GlobalGetBlockAt(glm::ivec3 position)
@@ -549,8 +651,7 @@ void UploadChunk(chunk* ch) {
         glm::ivec3 pos = ch->GetPosition(i);
 
 
-        float tileX = static_cast<int>(ch->BLOCKS[i]) % 32;
-        float tileY = static_cast<int>(ch->BLOCKS[i]) / 32;
+        
 
         //const float ATLAS_SIZE = 256.0f;
         //const float TILE_SIZE = 16.0f;
@@ -569,24 +670,7 @@ void UploadChunk(chunk* ch) {
         //float sY = 1.0f-(y0 / ATLAS_SIZE);
         //float eY = 1.0f-(y1 / ATLAS_SIZE);
 
-        float x0 = tileX * 16.0f;
-        float x1 = x0 + 16.0f;
-
-
-
-
-        float y0 = tileY * 16.0f;
-        float y1 = y0 + 16.0f;
-
-        float tm = y0;
-        y0 = y1;
-        y1 = tm;
-
-        float sX = x0 / 512.0f;
-        float eX = x1 / 512.0f;
-
-        float sY = 1.0f - (y0 / 512.0f);
-        float eY = 1.0f - (y1 / 512.0f);
+        
 
 
         //AMBIENT OCCLUSION
@@ -616,7 +700,7 @@ void UploadChunk(chunk* ch) {
 
         
 
-
+        BlockTextureMapping& map = texturemappings.at(ch->BLOCKS[i]);
         
 
         
@@ -651,6 +735,27 @@ void UploadChunk(chunk* ch) {
                 { 0, 1, 0 },
                 { -1, 1, 0 }
             );
+            
+            float tileX = static_cast<int>(map.FRONT) % 32;
+            float tileY = static_cast<int>(map.FRONT) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, sX, sY, AO[0][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, sY, AO[0][1]);
@@ -689,6 +794,26 @@ void UploadChunk(chunk* ch) {
                 { 0, 1, 0 },
                 { 1, 1, 0 }
             );
+            float tileX = static_cast<int>(map.BACK) % 32;
+            float tileY = static_cast<int>(map.BACK) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, sX, sY, AO[1][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, eX, sY, AO[1][1]);
@@ -727,7 +852,26 @@ void UploadChunk(chunk* ch) {
                 { 0, 1, 0 },
                 { 0, 1, -1 }
             );
+            float tileX = static_cast<int>(map.LEFT) % 32;
+            float tileY = static_cast<int>(map.LEFT) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
 
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[2][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, eX, sY, AO[2][1]);
@@ -766,6 +910,27 @@ void UploadChunk(chunk* ch) {
                 { 0, 1, 0 },
                 { 0, 1, 1 }
             );
+
+            float tileX = static_cast<int>(map.RIGHT) % 32;
+            float tileY = static_cast<int>(map.RIGHT) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, sX, sY, AO[3][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[3][1]);
@@ -804,6 +969,26 @@ void UploadChunk(chunk* ch) {
                 { 0, 0, -1 },
                 { -1, 0, -1 }
             );
+            float tileX = static_cast<int>(map.TOP) % 32;
+            float tileY = static_cast<int>(map.TOP) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
             Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, sY, AO[4][0]),
                 vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, sY, AO[4][1]);
@@ -842,6 +1027,26 @@ void UploadChunk(chunk* ch) {
                 { 0, 0, 1 },
                 { -1, 0, 1 }
             );
+            float tileX = static_cast<int>(map.BOTTOM) % 32;
+            float tileY = static_cast<int>(map.BOTTOM) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
             Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[5][0]);
             vertexCount++;
             Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[5][1]);
@@ -1100,19 +1305,26 @@ void mouseDown(GLFWwindow* window, int button, int action, int mods) {
         }
     }
 }
+void drawCubeDisplay();
+void refreshCubeDisplay();
 void onScroll(GLFWwindow* window, double xoffset, double yoffset) {
     if (yoffset > 0) {
         currentblock += 1;
         if (currentblock > 9) {
             currentblock = 1;
+            
         }
+        refreshCubeDisplay();
     }
     else if (yoffset < 0) {
         currentblock -= 1;
         if (currentblock < 1) {
             currentblock = 9;
+            
         }
+        refreshCubeDisplay();
     }
+    
 }
 float screenshottimer = 0.0f;
 void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -1171,7 +1383,7 @@ void LoadChunks() {
 
                     if (inserted)
                     {
-                        it->second.FillBlocks({ 0,0,0 }, { 15,0,15 }, STONE);
+                        it->second.FillBlocks({ 0,0,0 }, { 15,0,15 }, GRASS);
 
                         /*it->second.FillBlocks({ 0,0,0 }, { 15,0,0 }, COBBLE);
                         it->second.FillBlocks({ 0,0,0 }, { 0,0,15 }, COBBLE);
@@ -1220,7 +1432,10 @@ void LoadChunks() {
 GLFWwindow* window;
 uint HighLightVAO;
 uint MenuVAO;
+uint CubeVAO;
+uint CUBEVBO;
 void ScreenShot();
+
 int main()
 {
 #pragma region Init
@@ -1662,6 +1877,90 @@ int main()
     }
     #pragma endregion
 
+
+#pragma region Create Cube VAO
+
+        //brb
+    
+    glGenVertexArrays(1, &CubeVAO);
+    glGenBuffers(1, &CUBEVBO);
+
+    glBindVertexArray(CubeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, CUBEVBO);
+
+    std::vector<vertex> Blockvertices = {
+        // Front
+        vertex(-0.5f, -0.5f,  0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f, -0.5f,  0.5f, 1.0f, 0.0f, 0.0f),
+        vertex(0.5f,  0.5f,  0.5f, 1.0f, 1.0f, 0.0f),
+
+        vertex(-0.5f, -0.5f,  0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f,  0.5f,  0.5f, 1.0f, 1.0f, 0.0f),
+        vertex(-0.5f,  0.5f,  0.5f, 0.0f, 1.0f, 0.0f),
+
+        // Back
+        vertex(0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(-0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f),
+        vertex(-0.5f,  0.5f, -0.5f, 1.0f, 1.0f, 0.0f),
+
+        vertex(0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(-0.5f,  0.5f, -0.5f, 1.0f, 1.0f, 0.0f),
+        vertex(0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f),
+
+        // Left
+        vertex(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(-0.5f, -0.5f,  0.5f, 1.0f, 0.0f, 0.0f),
+        vertex(-0.5f,  0.5f,  0.5f, 1.0f, 1.0f, 0.0f),
+
+        vertex(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(-0.5f,  0.5f,  0.5f, 1.0f, 1.0f, 0.0f),
+        vertex(-0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f),
+
+        // Right
+        vertex(0.5f, -0.5f,  0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f),
+        vertex(0.5f,  0.5f, -0.5f, 1.0f, 1.0f, 0.0f),
+
+        vertex(0.5f, -0.5f,  0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f,  0.5f, -0.5f, 1.0f, 1.0f, 0.0f),
+        vertex(0.5f,  0.5f,  0.5f, 0.0f, 1.0f, 0.0f),
+
+        // Top
+        vertex(-0.5f,  0.5f,  0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f,  0.5f,  0.5f, 1.0f, 0.0f, 0.0f),
+        vertex(0.5f,  0.5f, -0.5f, 1.0f, 1.0f, 0.0f),
+
+        vertex(-0.5f,  0.5f,  0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f,  0.5f, -0.5f, 1.0f, 1.0f, 0.0f),
+        vertex(-0.5f,  0.5f, -0.5f, 0.0f, 1.0f, 0.0f),
+
+        // Bottom
+        vertex(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.0f),
+        vertex(0.5f, -0.5f,  0.5f, 1.0f, 1.0f, 0.0f),
+
+        vertex(-0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.0f),
+        vertex(0.5f, -0.5f,  0.5f, 1.0f, 1.0f, 0.0f),
+        vertex(-0.5f, -0.5f,  0.5f, 0.0f, 1.0f, 0.0f)
+    };
+
+
+
+
+    glBufferData(GL_ARRAY_BUFFER, Blockvertices.size() * sizeof(vertex), Blockvertices.data(), GL_DYNAMIC_DRAW);
+    //pos
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+    //uv
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3 * sizeof(float)));
+
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+#pragma endregion
+
+
 #pragma region Create UI VAO
     {
         
@@ -1804,7 +2103,7 @@ int main()
 
 
 
-
+    refreshCubeDisplay();
 
 
 
@@ -1828,8 +2127,8 @@ int main()
             glEnable(GL_CULL_FACE);
             player.tick();
             movement(deltaTime);
-
-            LoadChunks();
+            if(deltaTime<1.0f/60.0f)
+                LoadChunks();
             int width, height;
             glfwGetWindowSize(window, &width, &height);
             player.cam.FOV +=
@@ -1934,6 +2233,16 @@ int main()
                 glLineWidth(2.0f);
                 glDrawArrays(GL_LINES, 0, 32);
             }
+
+
+
+            //block display
+            drawCubeDisplay();
+            
+
+
+
+
             //test
             //DrawAABB(player.box.min+player.box.position, player.box.max+player.box.position, projection * view);
             if (screenshottimer > 0.0f) {
@@ -2329,4 +2638,232 @@ void ScreenShot() {
     screenshottimer = 0.5f;
     
 
+}
+void drawCubeDisplay() {
+    glDisable(GL_CULL_FACE);
+    glBindVertexArray(CubeVAO);
+    glm::mat4 model(1.0f);
+    model = glm::translate(model, glm::vec3(70.0f, 70.0f, 0.0f));
+    /*
+    player.cam.front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    player.cam.front.y = sin(glm::radians(pitch));
+    player.cam.front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    
+    
+    */
+    model = glm::rotate(model, cos(glm::radians(yaw)) * cos(glm::radians(pitch))*0.1f, glm::vec3(1, 0, 0));
+    model = glm::rotate(model, sin(glm::radians(pitch)), glm::vec3(0, 1, 0));
+    model = glm::rotate(model, sin(glm::radians(yaw)) * cos(glm::radians(pitch))*0.1f, glm::vec3(0, 0, 1));
+    model = glm::rotate(model, glm::radians(180.0f), glm::vec3(0, 0, 1));
+    model = glm::scale(model, glm::vec3(70.0f, 70.0f, 70.0f));
+    //glm::mat4 view=glm::lookAt(glm::vec3(0.0f,0.0f,10.0f), glm::vec3(0.0f, 0.0f, 10.0f)+glm::vec3(0.0f,0.0f,-1.0f),glm::vec3(0.0f,1.0f,0.0f));
+    glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(WIDTH), static_cast<float>(HEIGHT), 0.0f,-1000.0f,1000.0f);
+        //glm::perspective(glm::radians(30.0f), static_cast<float>(WIDTH)/static_cast<float>(HEIGHT),0.1f,1000.0f);
+    uint mvplocc = glGetUniformLocation(SimpleShaderProgram, "MVP");
+    uint texturelocc = glGetUniformLocation(SimpleShaderProgram, "texture0");
+    
+    glUseProgram(SimpleShaderProgram);
+
+
+    //brb
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, ATLAS);
+    glUniform1i(texturelocc, 0);
+
+    glUniformMatrix4fv(mvplocc, 1, GL_FALSE, glm::value_ptr(projection * model));
+
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glEnable(GL_CULL_FACE);
+}
+void refreshCubeDisplay() {
+    BlockTextureMapping& map = texturemappings.at(static_cast<block>(currentblock));
+    
+    int vertexCount = 0;
+    std::vector<vertex> Blockvertices;
+    // Front
+    {
+        float tileX = static_cast<int>(map.FRONT) % 32;
+        float tileY = static_cast<int>(map.FRONT) / 32;
+        float x0 = tileX * 16.0f;
+        float x1 = x0 + 16.0f;
+
+
+
+
+        float y0 = tileY * 16.0f;
+        float y1 = y0 + 16.0f;
+
+        float tm = y0;
+        y0 = y1;
+        y1 = tm;
+
+        float sX = x0 / 512.0f;
+        float eX = x1 / 512.0f;
+
+        float sY = 1.0f - (y0 / 512.0f);
+        float eY = 1.0f - (y1 / 512.0f);
+        Blockvertices.emplace_back(-0.5f, -0.5f, 0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, eX, sY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, 0.5f, eX, eY, 0);
+
+        Blockvertices.emplace_back(-0.5f, -0.5f, 0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, 0.5f, eX, eY, 0);
+        Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, sX, eY, 0);
+    }
+    // Back
+    {
+        float tileX = static_cast<int>(map.BACK) % 32;
+        float tileY = static_cast<int>(map.BACK) / 32;
+        float x0 = tileX * 16.0f;
+        float x1 = x0 + 16.0f;
+
+
+
+
+        float y0 = tileY * 16.0f;
+        float y1 = y0 + 16.0f;
+
+        float tm = y0;
+        y0 = y1;
+        y1 = tm;
+
+        float sX = x0 / 512.0f;
+        float eX = x1 / 512.0f;
+
+        float sY = 1.0f - (y0 / 512.0f);
+        float eY = 1.0f - (y1 / 512.0f);
+        Blockvertices.emplace_back(0.5f, -0.5f, -0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, eX, sY, 0);
+        Blockvertices.emplace_back(-0.5f, 0.5f, -0.5f, eX, eY, 0);
+
+        Blockvertices.emplace_back(0.5f, -0.5f, -0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(-0.5f, 0.5f, -0.5f, eX, eY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, sX, eY, 0);
+    }
+    // Left
+    {
+        float tileX = static_cast<int>(map.LEFT) % 32;
+        float tileY = static_cast<int>(map.LEFT) / 32;
+        float x0 = tileX * 16.0f;
+        float x1 = x0 + 16.0f;
+
+
+
+
+        float y0 = tileY * 16.0f;
+        float y1 = y0 + 16.0f;
+
+        float tm = y0;
+        y0 = y1;
+        y1 = tm;
+
+        float sX = x0 / 512.0f;
+        float eX = x1 / 512.0f;
+
+        float sY = 1.0f - (y0 / 512.0f);
+        float eY = 1.0f - (y1 / 512.0f);
+        Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(-0.5f, -0.5f, 0.5f, eX, sY, 0);
+        Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, eX, eY, 0);
+
+        Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, eX, eY, 0);
+        Blockvertices.emplace_back(-0.5f, 0.5f, -0.5f, sX, eY, 0);
+    }
+    // Right
+    {
+        float tileX = static_cast<int>(map.RIGHT) % 32;
+        float tileY = static_cast<int>(map.RIGHT) / 32;
+        float x0 = tileX * 16.0f;
+        float x1 = x0 + 16.0f;
+
+
+
+
+        float y0 = tileY * 16.0f;
+        float y1 = y0 + 16.0f;
+
+        float tm = y0;
+        y0 = y1;
+        y1 = tm;
+
+        float sX = x0 / 512.0f;
+        float eX = x1 / 512.0f;
+
+        float sY = 1.0f - (y0 / 512.0f);
+        float eY = 1.0f - (y1 / 512.0f);
+        Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(0.5f, -0.5f, -0.5f, eX, sY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, eX, eY, 0);
+
+        Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, eX, eY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, 0.5f, sX, eY, 0);
+    }
+    // Top
+    {
+        float tileX = static_cast<int>(map.TOP) % 32;
+        float tileY = static_cast<int>(map.TOP) / 32;
+        float x0 = tileX * 16.0f;
+        float x1 = x0 + 16.0f;
+
+
+
+
+        float y0 = tileY * 16.0f;
+        float y1 = y0 + 16.0f;
+
+        float tm = y0;
+        y0 = y1;
+        y1 = tm;
+
+        float sX = x0 / 512.0f;
+        float eX = x1 / 512.0f;
+
+        float sY = 1.0f - (y0 / 512.0f);
+        float eY = 1.0f - (y1 / 512.0f);
+        Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, sX, sY,0);
+        Blockvertices.emplace_back(0.5f, 0.5f, 0.5f, eX, sY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, eX, eY, 0);
+
+        Blockvertices.emplace_back(-0.5f, 0.5f, 0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(0.5f, 0.5f, -0.5f, eX, eY,0);
+        Blockvertices.emplace_back(-0.5f, 0.5f, -0.5f, sX, eY, 0);
+    }
+    // Bottom
+    {
+        float tileX = static_cast<int>(map.BOTTOM) % 32;
+        float tileY = static_cast<int>(map.BOTTOM) / 32;
+        float x0 = tileX * 16.0f;
+        float x1 = x0 + 16.0f;
+
+
+
+
+        float y0 = tileY * 16.0f;
+        float y1 = y0 + 16.0f;
+
+        float tm = y0;
+        y0 = y1;
+        y1 = tm;
+
+        float sX = x0 / 512.0f;
+        float eX = x1 / 512.0f;
+
+        float sY = 1.0f - (y0 / 512.0f);
+        float eY = 1.0f - (y1 / 512.0f);
+        Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, sX, sY, 0);
+        Blockvertices.emplace_back(0.5f, -0.5f, -0.5f, eX, sY, 0);
+        Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, eX, eY, 0);
+
+        Blockvertices.emplace_back(-0.5f, -0.5f, -0.5f, sX, sY,0);
+        Blockvertices.emplace_back(0.5f, -0.5f, 0.5f, eX, eY, 0);
+        Blockvertices.emplace_back(-0.5f, -0.5f, 0.5f, sX, eY, 0);
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, CUBEVBO);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, Blockvertices.size() * sizeof(vertex), Blockvertices.data());
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
