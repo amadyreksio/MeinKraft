@@ -344,7 +344,7 @@ class Player {
 public:
     camera cam;
     glm::vec3 velocity{ 0.0f };
-    glm::vec3 position{ 0.0f,3.0f,10.0f };
+    glm::vec3 position{ 0.0f,6.0f,10.0f };
     float SPEED = 4.317f;
     float SPRINT_SPEED = 5.612f;
     int RenderDistance = 10;
@@ -1383,7 +1383,9 @@ void LoadChunks() {
 
                     if (inserted)
                     {
-                        it->second.FillBlocks({ 0,0,0 }, { 15,0,15 }, GRASS);
+                        it->second.FillBlocks({ 0,2,0 }, { 15,2,15 }, GRASS);
+                        it->second.FillBlocks({ 0,1,0 }, { 15,1,15 }, DIRT);
+                        it->second.FillBlocks({ 0,0,0 }, { 15,0,15 }, BEDROCK);
 
                         /*it->second.FillBlocks({ 0,0,0 }, { 15,0,0 }, COBBLE);
                         it->second.FillBlocks({ 0,0,0 }, { 0,0,15 }, COBBLE);
@@ -1438,6 +1440,7 @@ void ScreenShot();
 
 int main()
 {
+    //player.position = { 100000000.0f,20.0f,0.0f };
 #pragma region Init
     if (!glfwInit()) {
         return -1;
@@ -2095,7 +2098,7 @@ int main()
     SubTitle.Tick = [&]() {
         if (GAME_STATE == MENU) {
             SubTitle.Scale = glm::vec2{ static_cast<float>(WIDTH) / 960.0f };
-            
+            SubTitle.LocationOffset = glm::vec2{ 150.0f,-150.0f }*SubTitle.Scale;
         }
        
 
