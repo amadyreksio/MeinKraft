@@ -32,5 +32,8 @@
     <ClInclude Include="stb_image.h">
       <Filter>ext</Filter>
     </ClInclude>
+    <ClInclude Include="perlin.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

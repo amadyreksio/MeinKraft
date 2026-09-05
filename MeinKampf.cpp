@@ -24,6 +24,9 @@
 #include <sstream>
 
 #include <functional>
+
+#include "perlin.h"
+
 std::random_device rd;
 std::uniform_real_distribution<float> rnd;
 enum GameStates {
@@ -369,11 +372,14 @@ std::unordered_map<ChunkPos, chunk, ChunkHash> ChunkPool;
 
 
 void UploadChunk(chunk* ch);
+void UploadChunk2(chunk* ch, glm::ivec3 pos);
 
 class chunk {
 private:
     
 public:
+    std::vector<vertex> vertices = {};
+    std::vector<uint> indices = {};
     uint VAO = 0;
     uint VBO, EBO;
 
@@ -381,6 +387,7 @@ public:
     bool generating = false;
     bool loading = false;
     bool generated = false;
+    float generatedchunk = false;
     bool loaded = false;
     bool dirty = false;
     ChunkPos chunkPos = ChunkPos(0, 0);
@@ -390,14 +397,14 @@ public:
     }
     ~chunk()
     {
-        if (VAO)
+        /*if (VAO)
             glDeleteVertexArrays(1, &VAO);
 
         if (VBO)
             glDeleteBuffers(1, &VBO);
 
         if (EBO)
-            glDeleteBuffers(1, &EBO);
+            glDeleteBuffers(1, &EBO);*/
     }
     void Load() {
         if (!loaded || !generated) {
@@ -409,6 +416,9 @@ public:
 
     void Generate() {
         UploadChunk(this);
+    }
+    void Generate2(glm::ivec3 pos) {
+        UploadChunk2(this,pos);
     }
 
 
@@ -492,7 +502,7 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
 
     it->second.SetBlock(local, BlockType);
     it->second.dirty = true;
-
+    //it->second.Generate2(local);
     if (local.x > 14) {
         ChunkPos cp2(
             static_cast<int>(floor((position.x+1) / 16.0f)),
@@ -613,8 +623,10 @@ void UploadChunk(chunk* ch) {
     ch->generated = false;
     ch->generating = true;
     //ChunkGenerateJobs.push_back()
-    std::vector<vertex> vertices = {};
-    std::vector<uint> indices = {};
+    
+    ch->vertices.clear();
+    ch->indices.clear();
+
 
 
     std::vector<uint> Blockindices = {
@@ -1058,7 +1070,7 @@ void UploadChunk(chunk* ch) {
         }
 
 
-        uint offset = vertices.size();
+        uint offset = ch->vertices.size();
         for (int i = 0;i < vertexCount;i++) {
             vertex vert = Blockvertices[i];
 
@@ -1068,66 +1080,596 @@ void UploadChunk(chunk* ch) {
             vert.z += pos.z;
             //vert.u += sX;
             //vert.v += sY;
-            vertices.push_back(vert);
+            ch->vertices.push_back(vert);
         }
 
         for (uint i = 0; i < vertexCount; i += 4) {
-            indices.push_back(offset + i + 0);
-            indices.push_back(offset + i + 1);
-            indices.push_back(offset + i + 2);
+            ch->indices.push_back(offset + i + 0);
+            ch->indices.push_back(offset + i + 1);
+            ch->indices.push_back(offset + i + 2);
 
-            indices.push_back(offset + i + 2);
-            indices.push_back(offset + i + 3);
-            indices.push_back(offset + i + 0);
+            ch->indices.push_back(offset + i + 2);
+            ch->indices.push_back(offset + i + 3);
+            ch->indices.push_back(offset + i + 0);
         }
     }
-    ch->indicessize = indices.size();
+    ch->indicessize = ch->indices.size();
 
 
 
     glBindVertexArray(0);
-    if (ch->VAO != 0) {
-        glDeleteVertexArrays(1, &ch->VAO);
-        if (ch->VBO != 0)
-            glDeleteBuffers(1, &ch->VBO);
-        if (ch->EBO != 0)
-            glDeleteBuffers(1, &ch->EBO);
-        ch->VAO = 0;
-        ch->VBO = 0;
-        ch->EBO = 0;
+    if (ch->VAO != 0&& ch->VBO != 0&& ch->EBO != 0) {
+        glBindVertexArray(ch->VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, ch->VBO);
+        glBufferData(GL_ARRAY_BUFFER, ch->vertices.size() * sizeof(vertex), ch->vertices.data(), GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ch->EBO);
+        glBufferData(
+            GL_ELEMENT_ARRAY_BUFFER,
+            ch->indices.size() * sizeof(uint),
+            ch->indices.data(),
+            GL_STATIC_DRAW
+        );
+
+        glBindVertexArray(0);
     }
+    else {
 
-    glGenVertexArrays(1, &ch->VAO);
-    glGenBuffers(1, &ch->VBO);
-    glGenBuffers(1, &ch->EBO);
-    glBindVertexArray(ch->VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, ch->VBO);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ch->EBO);
-
-
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertex), vertices.data(), GL_STATIC_DRAW);
-
-    //pos
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
-    //uv
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3 * sizeof(float)));
-
-    //AO
-    glVertexAttribIPointer(2, 1, GL_UNSIGNED_BYTE, sizeof(vertex), (const void*)(5 * sizeof(float)));
+        glGenVertexArrays(1, &ch->VAO);
+        glGenBuffers(1, &ch->VBO);
+        glGenBuffers(1, &ch->EBO);
+        glBindVertexArray(ch->VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, ch->VBO);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ch->EBO);
 
 
+        glBufferData(GL_ARRAY_BUFFER, ch->vertices.size() * sizeof(vertex), ch->vertices.data(), GL_DYNAMIC_DRAW);
 
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint), indices.data(), GL_STATIC_DRAW);
+        //pos
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+        //uv
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3 * sizeof(float)));
+
+        //AO
+        glVertexAttribIPointer(2, 1, GL_UNSIGNED_BYTE, sizeof(vertex), (const void*)(5 * sizeof(float)));
 
 
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-    glEnableVertexAttribArray(2);
+
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, ch->indices.size() * sizeof(uint), ch->indices.data(), GL_STATIC_DRAW);
 
 
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glEnableVertexAttribArray(2);
+
+
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+    ch->generating = false;
+    ch->generated = true;
+    ch->dirty = false;
+}
+void UploadChunk2(chunk* ch, glm::ivec3 pos) {
+    ch->generated = false;
+    ch->generating = true;
+    std::vector<uint> Blockindices = {
+        //Front
+         0,  1,  2,
+         2,  3,  0,
+
+         //Back
+          4,  5,  6,
+          6,  7,  4,
+
+          //Left
+           8,  9, 10,
+          10, 11,  8,
+
+          //Right
+          12, 13, 14,
+          14, 15, 12,
+
+          //Top
+          16, 17, 18,
+          18, 19, 16,
+
+          //Bottom
+          20, 21, 22,
+          22, 23, 20
+    };
+
+    for (int i = 0;i < sizeof(ch->BLOCKS) / sizeof(block);i++) {
+        if (glm::length(glm::vec3(ch->GetPosition(i)) - glm::vec3(pos)) > 5.0f)continue;
+        if (ch->BLOCKS[i] == AIR)continue;
+        std::array<vertex, 24> Blockvertices;
+        int vertexCount = 0;
+
+        glm::ivec3 pos = ch->GetPosition(i);
+
+
+
+
+        //const float ATLAS_SIZE = 256.0f;
+        //const float TILE_SIZE = 16.0f;
+        //const float BORDER = 2.0f;
+        //const float CELL_SIZE = TILE_SIZE + BORDER * 2.0f; // 20
+
+        //float x0 = (tileX) * CELL_SIZE + BORDER;
+        //float x1 = x0 + TILE_SIZE;
+
+        //float y0 = tileY * CELL_SIZE + BORDER;
+        //float y1 = y0 + TILE_SIZE;
+
+        //float sX = x0 / ATLAS_SIZE;
+        //float eX = x1 / ATLAS_SIZE;
+
+        //float sY = 1.0f-(y0 / ATLAS_SIZE);
+        //float eY = 1.0f-(y1 / ATLAS_SIZE);
+
+
+
+
+        //AMBIENT OCCLUSION
+#pragma region AO
+
+
+
+        uint8_t AO[6][4];
+
+        auto CalculateAO = [&](glm::ivec3 normal, glm::ivec3 side1, glm::ivec3 side2, glm::ivec3 corner) -> uint8_t
+            {
+                bool s1 = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z) * 16 + pos + normal + side1) != AIR);
+                bool s2 = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z) * 16 + pos + normal + side2) != AIR);
+                bool c = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z) * 16 + pos + normal + side1 + side2) != AIR);
+                if (s1 && s2) return 0; return 3 - (s1 + s2 + c);
+            };
+
+
+
+
+
+
+
+
+
+
+
+
+
+        BlockTextureMapping& map = texturemappings.at(ch->BLOCKS[i]);
+
+
+
+
+
+#pragma endregion
+        //Front
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,1 }) == AIR) {
+            AO[0][0] = CalculateAO(
+                { 0, 0, 1 },
+                { -1, 0, 0 },
+                { 0, -1, 0 },
+                { -1, -1, 0 }
+            );
+            AO[0][1] = CalculateAO(
+                { 0, 0, 1 },
+                { 1, 0, 0 },
+                { 0, -1, 0 },
+                { 1, -1, 0 }
+            );
+
+            AO[0][2] = CalculateAO(
+                { 0, 0, 1 },
+                { 1, 0, 0 },
+                { 0, 1, 0 },
+                { 1, 1, 0 }
+            );
+
+            AO[0][3] = CalculateAO(
+                { 0, 0, 1 },
+                { -1, 0, 0 },
+                { 0, 1, 0 },
+                { -1, 1, 0 }
+            );
+
+            float tileX = static_cast<int>(map.FRONT) % 32;
+            float tileY = static_cast<int>(map.FRONT) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, sX, sY, AO[0][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, sY, AO[0][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, eY, AO[0][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, eY, AO[0][3]);
+            vertexCount++;
+        }
+        //Back
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,-1 }) == AIR) {
+            AO[1][0] = CalculateAO(
+                { 0, 0, -1 },
+                { 1, 0, 0 },
+                { 0, -1, 0 },
+                { 1, -1, 0 }
+            );
+
+            AO[1][1] = CalculateAO(
+                { 0, 0, -1 },
+                { -1, 0, 0 },
+                { 0, -1, 0 },
+                { -1, -1, 0 }
+            );
+
+            AO[1][2] = CalculateAO(
+                { 0, 0, -1 },
+                { -1, 0, 0 },
+                { 0, 1, 0 },
+                { -1, 1, 0 }
+            );
+
+            AO[1][3] = CalculateAO(
+                { 0, 0, -1 },
+                { 1, 0, 0 },
+                { 0, 1, 0 },
+                { 1, 1, 0 }
+            );
+            float tileX = static_cast<int>(map.BACK) % 32;
+            float tileY = static_cast<int>(map.BACK) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, sX, sY, AO[1][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, eX, sY, AO[1][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, eX, eY, AO[1][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, sX, eY, AO[1][3]);
+            vertexCount++;
+        }
+        //Left
+        if (ch->GetBlockAt(pos + glm::ivec3{ -1,0,0 }) == AIR) {
+            AO[2][0] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, -1, 0 },
+                { 0, -1, -1 }
+            );
+
+            AO[2][1] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, -1, 0 },
+                { 0, -1, 1 }
+            );
+
+            AO[2][2] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, 1, 0 },
+                { 0, 1, 1 }
+            );
+
+            AO[2][3] = CalculateAO(
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, 1, 0 },
+                { 0, 1, -1 }
+            );
+            float tileX = static_cast<int>(map.LEFT) % 32;
+            float tileY = static_cast<int>(map.LEFT) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[2][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, eX, sY, AO[2][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, eX, eY, AO[2][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, sX, eY, AO[2][3]);
+            vertexCount++;
+        }
+        //Right
+        if (ch->GetBlockAt(pos + glm::ivec3{ 1,0,0 }) == AIR) {
+            AO[3][0] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, -1, 0 },
+                { 0, -1, 1 }
+            );
+
+            AO[3][1] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, -1, 0 },
+                { 0, -1, -1 }
+            );
+
+            AO[3][2] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 0, 1, 0 },
+                { 0, 1, -1 }
+            );
+
+            AO[3][3] = CalculateAO(
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 0, 1, 0 },
+                { 0, 1, 1 }
+            );
+
+            float tileX = static_cast<int>(map.RIGHT) % 32;
+            float tileY = static_cast<int>(map.RIGHT) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, sX, sY, AO[3][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[3][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, eX, eY, AO[3][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, sX, eY, AO[3][3]);
+            vertexCount++;
+        }
+        //Top
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,1,0 }) == AIR) {
+            AO[4][0] = CalculateAO(
+                { 0, 1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { -1, 0, 1 }
+            );
+
+            AO[4][1] = CalculateAO(
+                { 0, 1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 1, 0, 1 }
+            );
+
+            AO[4][2] = CalculateAO(
+                { 0, 1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 1, 0, -1 }
+            );
+
+            AO[4][3] = CalculateAO(
+                { 0, 1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { -1, 0, -1 }
+            );
+            float tileX = static_cast<int>(map.TOP) % 32;
+            float tileY = static_cast<int>(map.TOP) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, 0.5f, sX, sY, AO[4][0]),
+                vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, 0.5f, eX, sY, AO[4][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, 0.5f, -0.5f, eX, eY, AO[4][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, 0.5f, -0.5f, sX, eY, AO[4][3]);
+            vertexCount++;
+        }
+        //Bottom
+        if (ch->GetBlockAt(pos + glm::ivec3{ 0,-1,0 }) == AIR) {
+            AO[5][0] = CalculateAO(
+                { 0, -1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, -1 },
+                { -1, 0, -1 }
+            );
+
+            AO[5][1] = CalculateAO(
+                { 0, -1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, -1 },
+                { 1, 0, -1 }
+            );
+
+            AO[5][2] = CalculateAO(
+                { 0, -1, 0 },
+                { 1, 0, 0 },
+                { 0, 0, 1 },
+                { 1, 0, 1 }
+            );
+
+            AO[5][3] = CalculateAO(
+                { 0, -1, 0 },
+                { -1, 0, 0 },
+                { 0, 0, 1 },
+                { -1, 0, 1 }
+            );
+            float tileX = static_cast<int>(map.BOTTOM) % 32;
+            float tileY = static_cast<int>(map.BOTTOM) / 32;
+            float x0 = tileX * 16.0f;
+            float x1 = x0 + 16.0f;
+
+
+
+
+            float y0 = tileY * 16.0f;
+            float y1 = y0 + 16.0f;
+
+            float tm = y0;
+            y0 = y1;
+            y1 = tm;
+
+            float sX = x0 / 512.0f;
+            float eX = x1 / 512.0f;
+
+            float sY = 1.0f - (y0 / 512.0f);
+            float eY = 1.0f - (y1 / 512.0f);
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, -0.5f, sX, sY, AO[5][0]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, -0.5f, eX, sY, AO[5][1]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(0.5f, -0.5f, 0.5f, eX, eY, AO[5][2]);
+            vertexCount++;
+            Blockvertices[vertexCount] = vertex(-0.5f, -0.5f, 0.5f, sX, eY, AO[5][3]);
+            vertexCount++;
+        }
+
+
+        uint offset = ch->vertices.size();
+        for (int i = 0;i < vertexCount;i++) {
+            vertex vert = Blockvertices[i];
+
+
+            vert.x += pos.x;
+            vert.y += pos.y;
+            vert.z += pos.z;
+            //vert.u += sX;
+            //vert.v += sY;
+            ch->vertices.push_back(vert);
+        }
+
+        for (uint i = 0; i < vertexCount; i += 4) {
+            ch->indices.push_back(offset + i + 0);
+            ch->indices.push_back(offset + i + 1);
+            ch->indices.push_back(offset + i + 2);
+
+            ch->indices.push_back(offset + i + 2);
+            ch->indices.push_back(offset + i + 3);
+            ch->indices.push_back(offset + i + 0);
+        }
+    }
+    ch->indicessize = ch->indices.size();
     glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    if (ch->VAO != 0 && ch->VBO != 0 && ch->EBO != 0) {
+        glBindVertexArray(ch->VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, ch->VBO);
+        glBufferData(GL_ARRAY_BUFFER, ch->vertices.size() * sizeof(vertex), ch->vertices.data(), GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ch->EBO);
+        glBufferData(
+            GL_ELEMENT_ARRAY_BUFFER,
+            ch->indices.size() * sizeof(uint),
+            ch->indices.data(),
+            GL_STATIC_DRAW
+        );
+
+        glBindVertexArray(0);
+    }
+    else {
+
+        glGenVertexArrays(1, &ch->VAO);
+        glGenBuffers(1, &ch->VBO);
+        glGenBuffers(1, &ch->EBO);
+        glBindVertexArray(ch->VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, ch->VBO);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ch->EBO);
+
+
+        glBufferData(GL_ARRAY_BUFFER, ch->vertices.size() * sizeof(vertex), ch->vertices.data(), GL_DYNAMIC_DRAW);
+
+        //pos
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+        //uv
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)(3 * sizeof(float)));
+
+        //AO
+        glVertexAttribIPointer(2, 1, GL_UNSIGNED_BYTE, sizeof(vertex), (const void*)(5 * sizeof(float)));
+
+
+
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, ch->indices.size() * sizeof(uint), ch->indices.data(), GL_STATIC_DRAW);
+
+
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glEnableVertexAttribArray(2);
+
+
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
     ch->generating = false;
     ch->generated = true;
     ch->dirty = false;
@@ -1369,66 +1911,92 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
 
     }
 }
-void LoadChunks() {
-    glm::vec3 plposdiv = player.position / 16.0f;
-    for (int x = plposdiv.x - player.RenderDistance;x < plposdiv.x + player.RenderDistance;x++) {
-        for (int z = plposdiv.z - player.RenderDistance;z < plposdiv.z + player.RenderDistance;z++) {
-            if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
-                //genchunk
-                ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
-                if (!ChunkPool.count(cp)) {
+enum worldtype {
+    OVERWORLD=0, FLAT=1, NETHER=2, END=3
+};
+worldtype WORLD_TYPE = OVERWORLD;
+void GenerateWorldChunk(ChunkPos cp);
+void LoadChunks(float spareTime) {
+    float timepassed = 0.0f;
+    float chunktime = 0.0f;
+    int playerChunkX = static_cast<int>(std::floor(player.position.x / 16.0f));
+    int playerChunkZ = static_cast<int>(std::floor(player.position.z / 16.0f));
+    struct Chunktorender
+    {
+        ChunkPos pos;
+        float distanceSq;
+    };
 
-                    auto [it, inserted] = ChunkPool.try_emplace(cp);
-                    it->second.chunkPos = cp;
+    std::vector<Chunktorender> chunks;
 
-                    if (inserted)
-                    {
-                        it->second.FillBlocks({ 0,2,0 }, { 15,2,15 }, GRASS);
-                        it->second.FillBlocks({ 0,1,0 }, { 15,1,15 }, DIRT);
-                        it->second.FillBlocks({ 0,0,0 }, { 15,0,15 }, BEDROCK);
+    for (int x = playerChunkX - player.RenderDistance;
+        x <= playerChunkX + player.RenderDistance;
+        x++)
+    {
+        for (int z = playerChunkZ - player.RenderDistance;
+            z <= playerChunkZ + player.RenderDistance;
+            z++)
+        {
+            float dx = float(x - playerChunkX);
+            float dz = float(z - playerChunkZ);
 
-                        /*it->second.FillBlocks({ 0,0,0 }, { 15,0,0 }, COBBLE);
-                        it->second.FillBlocks({ 0,0,0 }, { 0,0,15 }, COBBLE);
-                        it->second.FillBlocks({ 15,0,0 }, { 15,0,15 }, COBBLE);
-                        it->second.FillBlocks({ 0,0,15 }, { 15,0,15 }, COBBLE);*/
-                        /*STONE,
-                            COBBLE,
-                            DIRT,
-                            GRASS,
-                            COAL_ORE,
-                            IRON_ORE,
-                            GOLD_ORE,
-                            DIAMOND_ORE,
-                            BEDROCK*/
-                       /* for (int i = 0;i < 10;i++) {
-                            it->second.SetBlock({ i,1,0 }, static_cast<block>(i));
-                        }*/
-                        /*for (int i = 0;i < 15 * 15;i+=3) {
-                            
-                            int x = i % 15;
-                            int z = i / 15;
-                            it->second.SetBlock({ x,1,z }, COBBLE);
-                            it->second.SetBlock({ x+1,1,z }, COBBLE);
-                            it->second.SetBlock({ x+2,1,z }, COBBLE);
-                            it->second.SetBlock({ x+1,2,z }, COBBLE);
-                            it->second.SetBlock({ x+1,3,z }, COBBLE);
-                        }*/
-                        
-                        
-                        
-                        it->second.Generate();
-                        it->second.loaded = true;
-                    }
+            float distanceSq = dx * dx + dz * dz;
 
-                }
-                else if (ChunkPool.at(cp).dirty) {
-                    //regen
-                    ChunkPool.at(cp).Generate();
-                }
+            if (distanceSq <= player.RenderDistance * player.RenderDistance)
+            {
+                chunks.push_back({
+                    ChunkPos(x, z),
+                    distanceSq
+                    });
             }
+        }
+    }
+    std::sort(chunks.begin(), chunks.end(),
+        [](const auto& a, const auto& b)
+        {
+            return a.distanceSq < b.distanceSq;
+        });
 
+
+    for (const auto& ch : chunks)
+    {
+        if (timepassed + chunktime * 2 >= spareTime)
+            return;
+
+        float tm = glfwGetTime();
+
+        ChunkPos cp = ch.pos;
+
+        auto [it, inserted] = ChunkPool.try_emplace(cp);
+        it->second.chunkPos = cp;
+
+        if (inserted)
+        {
+            float tmm = glfwGetTime();
+            GenerateWorldChunk(cp);
+            float dif = tmm - glfwGetTime();
+            if (timepassed + dif  >= spareTime)
+                return;
+            it->second.Generate();
+            it->second.loaded = true;
+        }
+        else
+        {
+            auto& ch = it->second;
+            if (ch.generatedchunk && !ch.generated) {
+                ch.Generate();
+                ch.dirty = false;
+            }
+            if (ch.dirty)
+            {
+                ch.Generate();
+                ch.dirty = false;
+            }
         }
 
+        float tm2 = glfwGetTime();
+        chunktime = tm2 - tm;
+        timepassed += chunktime;
     }
 }
 GLFWwindow* window;
@@ -1438,9 +2006,12 @@ uint CubeVAO;
 uint CUBEVBO;
 void ScreenShot();
 
+
 int main()
 {
-    //player.position = { 100000000.0f,20.0f,0.0f };
+    
+    PERLIN::generatePermutation(1308);
+    
 #pragma region Init
     if (!glfwInit()) {
         return -1;
@@ -2107,9 +2678,9 @@ int main()
 
 
     refreshCubeDisplay();
+    bool plrteleported = false;
 
-
-
+    float fpstimer = 0.0f;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
@@ -2122,6 +2693,9 @@ int main()
         float time = glfwGetTime();
         float deltaTime = time - lasttime;
         lasttime = time;
+        float FPS = 1.0f / deltaTime;
+        fpstimer += deltaTime;
+        
         if (GAME_STATE == INGAME) {
             if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_1)) {
                 mouseLocked = true;
@@ -2130,8 +2704,45 @@ int main()
             glEnable(GL_CULL_FACE);
             player.tick();
             movement(deltaTime);
-            if(deltaTime<1.0f/60.0f)
-                LoadChunks();
+            //if (deltaTime < 1.0f / 60.0f) {
+                float spareTime = 1.0f / 60.0f-deltaTime;
+                if (fpstimer >= 1.0f) {
+                    fpstimer = 0.0f;
+                    std::cout << FPS <<" " <<spareTime<< std::endl;
+                }
+                LoadChunks(spareTime);
+            //}
+                
+            auto playerchunk = ChunkPos(
+                static_cast<int>(glm::floor(player.position.x / 16.0f)),
+                static_cast<int>(glm::floor(player.position.z / 16.0f))
+            );
+            if (!ChunkPool.count(playerchunk) || !ChunkPool.at(playerchunk).generated) {
+                player.position.y = 0;
+            }
+            else {
+                if (!plrteleported) {
+                    plrteleported = true;
+                    //brb
+                    glm::ivec3 local(
+                        player.position.x - playerchunk.x * 16,
+                        player.position.y,
+                        player.position.z - playerchunk.z * 16
+                    );
+                    int lvl = 0;
+                    chunk& ch = ChunkPool.at(playerchunk);
+                    for (int y = 0;y < 255;y++) {
+                        if (ch.GetBlockAt({ local.x, y, local.z })!=AIR) {
+                            lvl++;
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                    player.position.y = lvl+6.0f;
+                }
+            }
+
             int width, height;
             glfwGetWindowSize(window, &width, &height);
             player.cam.FOV +=
@@ -2157,7 +2768,7 @@ int main()
             glm::vec3 plposdiv = player.position / 16.0f;
             for (int x = plposdiv.x - player.RenderDistance;x < plposdiv.x + player.RenderDistance;x++) {
                 for (int z = plposdiv.z - player.RenderDistance;z < plposdiv.z + player.RenderDistance;z++) {
-                    if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
+                    //if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
                         //genchunk
                         ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
                         if (ChunkPool.count(cp)) {
@@ -2169,7 +2780,8 @@ int main()
 
 
                         }
-                    }
+                    //
+//}
 
                 }
 
@@ -2869,4 +3481,58 @@ void refreshCubeDisplay() {
     glBufferSubData(GL_ARRAY_BUFFER, 0, Blockvertices.size() * sizeof(vertex), Blockvertices.data());
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+const int GRID_SIZE = 400;
+void GenerateWorldChunk(ChunkPos cp) {
+    chunk& ch = ChunkPool.at(cp);
+    switch (WORLD_TYPE) {
+    case FLAT: {
+        ch.FillBlocks({ 0,2,0 }, { 15,2,15 }, GRASS);
+        ch.FillBlocks({ 0,1,0 }, { 15,1,15 }, DIRT);
+        ch.FillBlocks({ 0,0,0 }, { 15,0,15 }, BEDROCK);
+        break;
+    }
+    case OVERWORLD:
+    {
+
+        for (int x = 0;x < 16;x++) {
+            for (int z = 0;z < 16;z++) {
+                float octaves = 5.0f;
+                float amplitude = 1.0f;
+                float frequency = 1.0f;
+                float val = 0.0f;
+                for (int i = 0; i < octaves; ++i)
+                {
+                    int worldX = cp.x * 16 + x;
+                    int worldZ = cp.z * 16 + z;
+                    val += PERLIN::perlin(worldX * frequency / GRID_SIZE, worldZ * frequency / GRID_SIZE) * amplitude;
+
+                    frequency *= 2.0f;
+                    amplitude *= 0.5f;
+                }
+
+                if (val > 1.0f)
+                    val = 1.0f;
+                else if (val < -1.0f)
+                    val = -1.0f;
+                int color = (int)(((val + 1.0f) * 0.5f) * 255);
+                color = std::max(3.0f, color - 50.0f);
+                for (int y = 0;y < color;y++) {
+                    if (y == color - 1) {
+                        ch.SetBlock({ x,y,z }, GRASS);
+                    }
+                    else {
+                        ch.SetBlock({ x,y,z }, DIRT);
+                    }
+
+                }
+            }
+        }
+        break;
+    }
+    default:break;
+    }
+    ch.generatedchunk = true;
+   
 }
