@@ -184,7 +184,24 @@ enum block {
     IRON_ORE,
     GOLD_ORE,
     DIAMOND_ORE,
-    BEDROCK
+    BEDROCK,
+    WHITE_CONCRETE,
+    ORANGE_CONCRETE,
+    MAGENTA_CONCRETE,
+    LIGHT_BLUE_CONCRETE,
+    YELLOW_CONCRETE,
+    LIME_CONCRETE,
+    PINK_CONCRETE,
+    GRAY_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    CYAN_CONCRETE,
+    PURPLE_CONCRETE,
+    BLUE_CONCRETE,
+    BROWN_CONCRETE,
+    GREEN_CONCRETE,
+    RED_CONCRETE,
+    BLACK_CONCRETE,
+
 };
 struct BlockTextureMapping {
     int TOP = 0, BOTTOM = 0, LEFT = 0, RIGHT = 0, FRONT = 0, BACK = 0;
@@ -210,6 +227,22 @@ std::unordered_map<block, BlockTextureMapping> texturemappings = {
     {GOLD_ORE, {8}},
     {DIAMOND_ORE, {9}},
     {BEDROCK, {10}},
+    {WHITE_CONCRETE, {11}},
+    {ORANGE_CONCRETE, {12}},
+    {MAGENTA_CONCRETE, {13}},
+    {LIGHT_BLUE_CONCRETE, {14}},
+    {YELLOW_CONCRETE, {15}},
+    {LIME_CONCRETE, {16}},
+    {PINK_CONCRETE, {17}},
+    {GRAY_CONCRETE, {18}},
+    {LIGHT_GRAY_CONCRETE, {19}},
+    {CYAN_CONCRETE, {20}},
+    {PURPLE_CONCRETE, {21}},
+    {BLUE_CONCRETE, {22}},
+    {BROWN_CONCRETE, {23}},
+    {GREEN_CONCRETE, {24}},
+    {RED_CONCRETE, {25}},
+    {BLACK_CONCRETE, {26}},
 
 };
 int currentblock = 1;
@@ -347,10 +380,10 @@ class Player {
 public:
     camera cam;
     glm::vec3 velocity{ 0.0f };
-    glm::vec3 position{ 0.0f,6.0f,10.0f };
+    glm::dvec3 position{ 0.0f,6.0f,10.0f };
     float SPEED = 4.317f;
     float SPRINT_SPEED = 5.612f;
-    int RenderDistance = 10;
+    int RenderDistance = 25;
     float reach = 4.5f;
 
     bool grounded = false;
@@ -485,8 +518,8 @@ public:
 void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
     
     ChunkPos cp(
-        static_cast<int>(floor(position.x / 16.0f)),
-        static_cast<int>(floor(position.z / 16.0f))
+        static_cast<int>(floor(position.x / 16.0)),
+        static_cast<int>(floor(position.z / 16.0))
     );
     glm::ivec3 local(
         position.x - cp.x * 16,
@@ -505,8 +538,8 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
     //it->second.Generate2(local);
     if (local.x > 14) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x+1) / 16.0f)),
-            static_cast<int>(floor(position.z / 16.0f))
+            static_cast<int>(floor((position.x+1) / 16.0)),
+            static_cast<int>(floor(position.z / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -514,8 +547,8 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
     }
     if (local.x < 2) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x - 1) / 16.0f)),
-            static_cast<int>(floor(position.z / 16.0f))
+            static_cast<int>(floor((position.x - 1) / 16.0)),
+            static_cast<int>(floor(position.z / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -523,8 +556,8 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
     }
     if (local.z > 14) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x) / 16.0f)),
-            static_cast<int>(floor((position.z+1) / 16.0f))
+            static_cast<int>(floor((position.x) / 16.0)),
+            static_cast<int>(floor((position.z+1) / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -532,8 +565,8 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
     }
     if (local.z < 2) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x) / 16.0f)),
-            static_cast<int>(floor((position.z - 1) / 16.0f))
+            static_cast<int>(floor((position.x) / 16.0)),
+            static_cast<int>(floor((position.z - 1) / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -544,8 +577,8 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
 void GlobalBreakBlock(glm::ivec3 position) {
 
     ChunkPos cp(
-        static_cast<int>(floor(position.x / 16.0f)),
-        static_cast<int>(floor(position.z / 16.0f))
+        static_cast<int>(floor(position.x / 16.0)),
+        static_cast<int>(floor(position.z / 16.0))
     );
     glm::ivec3 local(
         position.x - cp.x * 16,
@@ -564,8 +597,8 @@ void GlobalBreakBlock(glm::ivec3 position) {
 
     if (local.x > 14) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x + 1) / 16.0f)),
-            static_cast<int>(floor(position.z / 16.0f))
+            static_cast<int>(floor((position.x + 1) / 16.0)),
+            static_cast<int>(floor(position.z / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -573,8 +606,8 @@ void GlobalBreakBlock(glm::ivec3 position) {
     }
     if (local.x < 2) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x - 1) / 16.0f)),
-            static_cast<int>(floor(position.z / 16.0f))
+            static_cast<int>(floor((position.x - 1) / 16.0)),
+            static_cast<int>(floor(position.z / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -582,8 +615,8 @@ void GlobalBreakBlock(glm::ivec3 position) {
     }
     if (local.z > 14) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x) / 16.0f)),
-            static_cast<int>(floor((position.z + 1) / 16.0f))
+            static_cast<int>(floor((position.x) / 16.0)),
+            static_cast<int>(floor((position.z + 1) / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -591,8 +624,8 @@ void GlobalBreakBlock(glm::ivec3 position) {
     }
     if (local.z < 2) {
         ChunkPos cp2(
-            static_cast<int>(floor((position.x) / 16.0f)),
-            static_cast<int>(floor((position.z - 1) / 16.0f))
+            static_cast<int>(floor((position.x) / 16.0)),
+            static_cast<int>(floor((position.z - 1) / 16.0))
         );
         if (ChunkPool.count(cp2)) {
             ChunkPool.at(cp2).dirty = true;
@@ -1754,13 +1787,13 @@ void mouseDown(GLFWwindow* window, int button, int action, int mods) {
         ChunkPos cp(0,0);
         while (dist <= player.reach)
         {
-            glm::vec3 ray =
+            glm::dvec3 ray =
                 player.position +
-                player.cam.position +
-                player.cam.front * dist;
+                glm::dvec3(player.cam.position) +
+                glm::dvec3(player.cam.front) * static_cast<double>(dist);
 
             glm::ivec3 blockPos = glm::ivec3(
-                glm::floor(ray + glm::vec3(0.5f))
+                glm::floor(ray + glm::dvec3(0.5f))
             );
 
             cp=ChunkPos(
@@ -1809,13 +1842,13 @@ void mouseDown(GLFWwindow* window, int button, int action, int mods) {
         ChunkPos cp(0, 0);
         while (dist <= player.reach)
         {
-            glm::vec3 ray =
+            glm::dvec3 ray =
                 player.position +
-                player.cam.position +
-                player.cam.front * dist;
+                glm::dvec3(player.cam.position) +
+                glm::dvec3(player.cam.front) * static_cast<double>(dist);
 
             glm::ivec3 blockPos = glm::ivec3(
-                glm::floor(ray + glm::vec3(0.5f))
+                glm::floor(ray + glm::dvec3(0.5f))
             );
 
             cp = ChunkPos(
@@ -1852,7 +1885,7 @@ void refreshCubeDisplay();
 void onScroll(GLFWwindow* window, double xoffset, double yoffset) {
     if (yoffset > 0) {
         currentblock += 1;
-        if (currentblock > 9) {
+        if (currentblock > 25) {
             currentblock = 1;
             
         }
@@ -1861,7 +1894,7 @@ void onScroll(GLFWwindow* window, double xoffset, double yoffset) {
     else if (yoffset < 0) {
         currentblock -= 1;
         if (currentblock < 1) {
-            currentblock = 9;
+            currentblock = 25;
             
         }
         refreshCubeDisplay();
@@ -2009,7 +2042,7 @@ void ScreenShot();
 
 int main()
 {
-    
+    //player.position.x = 2000000000.0;
     PERLIN::generatePermutation(1308);
     
 #pragma region Init
@@ -2709,6 +2742,7 @@ int main()
                 if (fpstimer >= 1.0f) {
                     fpstimer = 0.0f;
                     std::cout << FPS <<" " <<spareTime<< std::endl;
+                    std::cout << "POSITION: " << "X: " << player.position.x << " Y: " << player.position.y << " Z: " << player.position.z<<std::endl;
                 }
                 LoadChunks(spareTime);
             //}
@@ -2752,7 +2786,11 @@ int main()
                 player.cam.FOV = 80.0f;
             }
             glm::mat4 projection = glm::perspective(glm::radians(player.cam.FOV), static_cast<float>(width) / static_cast<float>(height), 0.1f, 1000.0f);
-            glm::mat4 view = glm::lookAt(player.position + player.cam.position, player.position + player.cam.position + player.cam.front, player.cam.up);
+            glm::mat4 view = glm::lookAt(
+                glm::vec3(0.0f),                 // camera always "here"
+                player.cam.front,
+                player.cam.up
+            );
             glUseProgram(ShaderProgram);
 
             uint mvploc = glGetUniformLocation(ShaderProgram, "MVP");
@@ -2765,15 +2803,18 @@ int main()
 
             //TESTCHUNK.Render();
 
-            glm::vec3 plposdiv = player.position / 16.0f;
+            glm::vec3 plposdiv = player.position / 16.0;
             for (int x = plposdiv.x - player.RenderDistance;x < plposdiv.x + player.RenderDistance;x++) {
                 for (int z = plposdiv.z - player.RenderDistance;z < plposdiv.z + player.RenderDistance;z++) {
                     //if (glm::length(glm::vec3(x, 0, z) - plposdiv) <= player.RenderDistance) {
                         //genchunk
+                    glm::dvec3 camWorldPos = player.position + glm::dvec3(player.cam.position);
                         ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
                         if (ChunkPool.count(cp)) {
-                            glm::mat4 model(1.0f);
-                            model = glm::translate(model, glm::vec3(cp.x, 0.0f, cp.z) * 16.0f);
+                            glm::dvec3 chunkWorldOrigin = glm::dvec3(cp.x, 0.0, cp.z) * 16.0;
+                            glm::vec3 relOffset = glm::vec3(chunkWorldOrigin - camWorldPos);
+                            glm::mat4 model = glm::translate(glm::mat4(1.0f), relOffset);
+                            
                             glm::mat4 MVP = projection * view * model;
                             glUniformMatrix4fv(mvploc, 1, GL_FALSE, glm::value_ptr(MVP));
                             ChunkPool.at(cp).Render();
@@ -2799,13 +2840,13 @@ int main()
             bool hitblock = false;
             while (dist <= player.reach)
             {
-                glm::vec3 ray =
+                glm::dvec3 ray =
                     player.position +
-                    player.cam.position +
-                    player.cam.front * dist;
+                    glm::dvec3(player.cam.position) +
+                    glm::dvec3(player.cam.front) * static_cast<double>(dist);
 
                 glm::ivec3 blockPos = glm::ivec3(
-                    glm::floor(ray + glm::vec3(0.5f))
+                    glm::floor(ray + glm::dvec3(0.5f))
                 );
 
                 ChunkPos cp(
@@ -2832,15 +2873,16 @@ int main()
                 dist += step;
             }
             glBindVertexArray(HighLightVAO);
-
-            glm::vec3 blockWorldPos(
-                Hchunk.x * 16.0f + localpos.x,
+            glm::dvec3 camWorldPos = player.position + glm::dvec3(player.cam.position);
+            glm::dvec3 blockWorldPos(
+                Hchunk.x * 16.0 + localpos.x,
                 localpos.y,
-                Hchunk.z * 16.0f + localpos.z
+                Hchunk.z * 16.0 + localpos.z
             );
+            glm::vec3 relBlockPos = glm::vec3(blockWorldPos - camWorldPos);
 
             glm::mat4 model(1.0f);
-            model = glm::translate(model, blockWorldPos);
+            model = glm::translate(model, relBlockPos);
             model = glm::scale(model, glm::vec3(1.005f, 1.005f, 1.005f));
             glm::mat4 MVP = projection * view * model;
             if (hitblock) {
@@ -3500,8 +3542,9 @@ void GenerateWorldChunk(ChunkPos cp) {
             for (int z = 0;z < 16;z++) {
                 float octaves = 5.0f;
                 float amplitude = 1.0f;
-                float frequency = 1.0f;
+                float frequency = 0.9f;
                 float val = 0.0f;
+                int colorstone = 0;
                 for (int i = 0; i < octaves; ++i)
                 {
                     int worldX = cp.x * 16 + x;
@@ -3510,6 +3553,10 @@ void GenerateWorldChunk(ChunkPos cp) {
 
                     frequency *= 2.0f;
                     amplitude *= 0.5f;
+                    if (i == 2) {
+                         colorstone = (int)(((val + 1.0f) * 0.5f) * 255);
+                         
+                    }
                 }
 
                 if (val > 1.0f)
@@ -3525,6 +3572,14 @@ void GenerateWorldChunk(ChunkPos cp) {
                     else {
                         ch.SetBlock({ x,y,z }, DIRT);
                     }
+
+                }
+
+
+                colorstone = std::max(3.0f, colorstone - 70.0f);
+                for (int y = 0;y < colorstone;y++) {
+                    
+                    ch.SetBlock({ x,y,z }, STONE);
 
                 }
             }
