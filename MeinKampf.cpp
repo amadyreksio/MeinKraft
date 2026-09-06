@@ -26,6 +26,7 @@
 #include <functional>
 
 #include "perlin.h"
+#include "noisenoise.h"
 
 std::random_device rd;
 std::uniform_real_distribution<float> rnd;
@@ -174,7 +175,7 @@ struct vertex {
         x = 0;y = 0;z = 0;u = 0;v = 0;
     }
 };
-enum block {
+enum block : uint8_t {
     AIR,
     STONE,
     COBBLE,
@@ -1183,6 +1184,10 @@ void UploadChunk(chunk* ch) {
     ch->generating = false;
     ch->generated = true;
     ch->dirty = false;
+    ch->vertices.clear();
+    ch->vertices.shrink_to_fit();
+    ch->indices.clear();
+    ch->indices.shrink_to_fit();
 }
 void UploadChunk2(chunk* ch, glm::ivec3 pos) {
     ch->generated = false;
@@ -1902,6 +1907,7 @@ void onScroll(GLFWwindow* window, double xoffset, double yoffset) {
     
 }
 float screenshottimer = 0.0f;
+void ScreenshotPanorama();
 void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_RELEASE) {
         mouseLocked = !mouseLocked;
@@ -1920,6 +1926,9 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
             screenshottimer = 0.5f;
         }
 
+    }
+    else if (key == GLFW_KEY_F3 && action == GLFW_PRESS) {
+        ScreenshotPanorama();
     }
     else if (key == GLFW_KEY_F4 && action == GLFW_PRESS) {
         yaw = std::round(yaw / 90.0f) * 90.0f;
@@ -2783,11 +2792,11 @@ int main()
                 (player.cam.TargetFOV * player.cam.FOV_Multiplier - player.cam.FOV)
                 * 5.0f * deltaTime;
             if (glfwGetKey(window, GLFW_KEY_F6)) {
-                player.cam.FOV = 80.0f;
+                player.cam.FOV = 90.0f;
             }
             glm::mat4 projection = glm::perspective(glm::radians(player.cam.FOV), static_cast<float>(width) / static_cast<float>(height), 0.1f, 1000.0f);
             glm::mat4 view = glm::lookAt(
-                glm::vec3(0.0f),                 // camera always "here"
+                glm::vec3(0.0f),
                 player.cam.front,
                 player.cam.up
             );
@@ -3250,6 +3259,91 @@ void movement(float deltaTime)
     player.box.position = player.position;
     
 }
+uint PanoFBO = 0, PanoColorTex = 0, PanoDepthRBO = 0;
+const int PANO_SIZE = 1024;
+
+void EnsurePanoFBO() {
+    if (PanoFBO) return;
+    glGenFramebuffers(1, &PanoFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, PanoFBO);
+
+    glGenTextures(1, &PanoColorTex);
+    glBindTexture(GL_TEXTURE_2D, PanoColorTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, PANO_SIZE, PANO_SIZE, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, PanoColorTex, 0);
+
+    glGenRenderbuffers(1, &PanoDepthRBO);
+    glBindRenderbuffer(GL_RENDERBUFFER, PanoDepthRBO);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, PANO_SIZE, PANO_SIZE);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, PanoDepthRBO);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+void ScreenshotPanorama() {
+    EnsurePanoFBO();
+
+    glm::vec3 up = (std::abs(player.cam.front.y) > 0.99f)
+        ? glm::vec3(0, 0, 1)
+        : glm::vec3(0, 1, 0);
+
+    glm::mat4 projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.05f, 1000.0f);
+    glm::mat4 view = glm::lookAt(glm::vec3(0.0f), player.cam.front, up);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, PanoFBO);
+    glViewport(0, 0, PANO_SIZE, PANO_SIZE);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+
+    glUseProgram(ShaderProgram);
+    uint mvploc = glGetUniformLocation(ShaderProgram, "MVP");
+    uint textureloc = glGetUniformLocation(ShaderProgram, "texture0");
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, ATLAS);
+    glUniform1i(textureloc, 0);
+
+    glm::dvec3 camWorldPos = player.position + glm::dvec3(player.cam.position);
+    glm::dvec3 plposdiv = camWorldPos / 16.0;
+    for (int x = plposdiv.x - player.RenderDistance; x < plposdiv.x + player.RenderDistance; x++) {
+        for (int z = plposdiv.z - player.RenderDistance; z < plposdiv.z + player.RenderDistance; z++) {
+            ChunkPos cp((int)x, (int)z);
+            if (ChunkPool.count(cp)) {
+                glm::dvec3 chunkWorldOrigin = glm::dvec3(cp.x, 0.0, cp.z) * 16.0;
+                glm::vec3 relOffset = glm::vec3(chunkWorldOrigin - camWorldPos);
+                glm::mat4 model = glm::translate(glm::mat4(1.0f), relOffset);
+                glm::mat4 MVP = projection * view * model;
+                glUniformMatrix4fv(mvploc, 1, GL_FALSE, glm::value_ptr(MVP));
+                ChunkPool.at(cp).Render();
+            }
+        }
+    }
+
+    std::vector<unsigned char> pixels(PANO_SIZE * PANO_SIZE * 3);
+    glReadPixels(0, 0, PANO_SIZE, PANO_SIZE, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    for (int y = 0; y < PANO_SIZE / 2; ++y) {
+        unsigned char* row1 = pixels.data() + y * PANO_SIZE * 3;
+        unsigned char* row2 = pixels.data() + (PANO_SIZE - 1 - y) * PANO_SIZE * 3;
+        for (int x = 0; x < PANO_SIZE * 3; ++x)
+            std::swap(row1[x], row2[x]);
+    }
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    std::ostringstream filename;
+    filename << "PANORAMA-" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".png";
+    stbi_write_png(filename.str().c_str(), PANO_SIZE, PANO_SIZE, 3, pixels.data(), PANO_SIZE * 3);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, WIDTH, HEIGHT);
+}
 
 void ScreenShot() {
     std::vector<unsigned char> pixels(WIDTH * HEIGHT* 3);
@@ -3526,6 +3620,7 @@ void refreshCubeDisplay() {
 }
 
 const int GRID_SIZE = 400;
+int SEED = 1308;
 void GenerateWorldChunk(ChunkPos cp) {
     chunk& ch = ChunkPool.at(cp);
     switch (WORLD_TYPE) {
@@ -3582,6 +3677,27 @@ void GenerateWorldChunk(ChunkPos cp) {
                     ch.SetBlock({ x,y,z }, STONE);
 
                 }
+
+                ////drzewka
+                //float trfrequency = 0.3f;
+
+                //int spacing = 4;
+                //float density = 0.3f;
+
+                //if (x % spacing == 0 && z % spacing == 0)
+                //{
+                //    float n = noise2D(x / spacing, z / spacing, SEED);
+
+                //    if (n < density)
+                //    {
+                //        ch.SetBlock({ x,color,z }, COBBLE);
+                //    }
+                //}
+               
+
+
+               
+                
             }
         }
         break;
