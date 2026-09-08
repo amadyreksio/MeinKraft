@@ -137,8 +137,9 @@ void main(){
 const char* HighlightFragmentSource = R"(
 #version 330 core
 out vec4 FragColor;
+uniform vec4 color;
 void main(){
-FragColor=vec4(0.0,0.0,0.0,1.0);
+FragColor=color;
 }
 )";
 bool DoScreenshot = false;
@@ -265,6 +266,12 @@ struct ChunkPos {
     bool operator==(const ChunkPos& other)const {
         return(x == other.x && z == other.z);
     }
+    ChunkPos operator+(const ChunkPos& other) {
+        return ChunkPos(x + other.x, z + other.z);
+    }
+    ChunkPos operator-(const ChunkPos& other) {
+        return ChunkPos(x - other.x, z - other.z);
+    }
 
 };
 
@@ -303,6 +310,7 @@ bool checkAABBCollision(const AABB& a, const AABB& b)
         aMin.z <= bMax.z && aMax.z >= bMin.z;
 }
 uint mvploc2;
+uint highlightcolorloc;
 void DrawAABB(const glm::vec3& min, const glm::vec3& max, const glm::mat4& vp)
 {
     glm::vec3 corners[8] = {
@@ -352,6 +360,7 @@ void DrawAABB(const glm::vec3& min, const glm::vec3& max, const glm::mat4& vp)
     glDeleteBuffers(1, &EBO);
 }
 uint UIVAO;
+uint crosshair;
 float mx=0, my=0;
 struct UIElement {
 private:
@@ -392,7 +401,7 @@ public:
     float SPEED = 4.317f;
     float SPRINT_SPEED = 5.612f;
     int RenderDistance = 25;
-    float reach = 4.5f;
+    float reach = 5.0f;
 
     bool grounded = false;
     float GRAVITY = 25.0f;
@@ -426,7 +435,8 @@ public:
     std::vector<uint> indices = {};
     uint VAO = 0;
     uint VBO, EBO;
-
+    bool AOupdated = false;
+    bool structuresGenerated = false;
     int indicessize = 0;
     bool generating = false;
     bool loading = false;
@@ -484,7 +494,9 @@ public:
         //int localbly = position.y - sc*16;
         //BLOCKS[GetID(glm::ivec3(x, localbly,z))] = BlockType;
         if (position.x < 0 || position.z < 0)return;
-        BLOCKS[GetID(position)] = BlockType;
+        int id = GetID(position);
+        if (id > BLOCKS.size())return;
+        BLOCKS[id] = BlockType;
         //dirty = true;
     }
     void RemoveBlock(glm::ivec3 position) {
@@ -534,6 +546,27 @@ public:
         return glm::ivec3(x, y, z);
     }
 };
+void GlobalSetBlockAtNoDirty(glm::ivec3 position, block BlockType) {
+    ChunkPos cp(
+        static_cast<int>(floor(position.x / 16.0)),
+        static_cast<int>(floor(position.z / 16.0))
+    );
+    glm::ivec3 local(
+        position.x - cp.x * 16,
+        position.y,
+        position.z - cp.z * 16
+    );
+    if (local.x < 0 || local.x >= 16 ||
+        local.y < 0 || local.y >= sky_limit ||
+        local.z < 0 || local.z >= 16)
+        return;
+
+    auto [it, inserted] = ChunkPool.try_emplace(cp);
+
+    it->second.SetBlock(local, BlockType);
+    
+    //it->second.Generate2(local);
+}
 
 void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
     
@@ -656,8 +689,8 @@ void GlobalBreakBlock(glm::ivec3 position) {
 block GlobalGetBlockAt(glm::ivec3 position)
 {
     ChunkPos cp(
-        static_cast<int>(glm::floor(position.x / 16.0f)),
-        static_cast<int>(glm::floor(position.z / 16.0f))
+        static_cast<int>(glm::floor(position.x / 16.0)),
+        static_cast<int>(glm::floor(position.z / 16.0))
     );
 
     glm::ivec3 local(
@@ -712,7 +745,22 @@ void UploadChunk(chunk* ch) {
           20, 21, 22,
           22, 23, 20
     };
+    auto GetNeighborBlock = [&](glm::ivec3 localPos) -> block
+        {
+            glm::ivec3 worldPos =
+                glm::ivec3(ch->chunkPos.x * 16, 0, ch->chunkPos.z * 16)
+                + localPos;
 
+            return GlobalGetBlockAt(worldPos);
+        };
+    auto IsTransparentBlock = [](block Block)->bool {
+        if (Block == OAK_LEAVES) {
+            return true;
+        }
+        else {
+            return false;
+        }
+        };
     for (int i = 0;i < sizeof(ch->BLOCKS) / sizeof(block);i++) {
         if (ch->BLOCKS[i] == AIR)continue;
         std::array<vertex, 24> Blockvertices;
@@ -720,7 +768,7 @@ void UploadChunk(chunk* ch) {
 
         glm::ivec3 pos = ch->GetPosition(i);
 
-        bool transparent = ch->BLOCKS[i] == OAK_LEAVES;
+        bool transparent = IsTransparentBlock(ch->BLOCKS[i]);
         
 
         //const float ATLAS_SIZE = 256.0f;
@@ -752,10 +800,16 @@ void UploadChunk(chunk* ch) {
         
         auto CalculateAO = [&](glm::ivec3 normal, glm::ivec3 side1, glm::ivec3 side2, glm::ivec3 corner) -> uint8_t
             {
-                bool s1 = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z)*16 + pos + normal + side1) != AIR);
-                bool s2 = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z)*16 + pos + normal + side2) != AIR);
-                bool c = (GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z)*16 + pos + normal + side1 + side2) != AIR);
-                if (s1 && s2) return 0; return 3 - (s1 + s2 + c);
+                block b1= GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z) * 16 + pos + normal + side1);
+                block b2= GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z) * 16 + pos + normal + side2);
+                block b3= GlobalGetBlockAt(glm::ivec3(ch->chunkPos.x, 0, ch->chunkPos.z) * 16 + pos + normal + side1 + side2);
+                bool s1 = ( b1!= AIR);
+                bool s2 = ( b2!= AIR);
+                bool c = ( b3!= AIR);
+                if (s1 && s2)
+                    return 0;
+
+                return 3 - (s1 + s2 + c);
             };
 
         
@@ -778,7 +832,8 @@ void UploadChunk(chunk* ch) {
 
 #pragma endregion
         //Front
-        if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,1 }) == AIR|| transparent) {
+        auto bl0 = GetNeighborBlock(pos + glm::ivec3{ 0,0,1 });
+        if ( bl0== AIR|| transparent||IsTransparentBlock(bl0)) {
             AO[0][0] = CalculateAO(
                 { 0, 0, 1 },
                 { -1, 0, 0 },
@@ -836,7 +891,8 @@ void UploadChunk(chunk* ch) {
             vertexCount++;
         }
         //Back
-        if (ch->GetBlockAt(pos + glm::ivec3{ 0,0,-1 }) == AIR|| transparent) {
+        auto bl1 = GetNeighborBlock(pos + glm::ivec3{ 0,0,-1 });
+        if ( bl1== AIR|| transparent||IsTransparentBlock(bl1)) {
             AO[1][0] = CalculateAO(
                 { 0, 0, -1 },
                 { 1, 0, 0 },
@@ -894,7 +950,8 @@ void UploadChunk(chunk* ch) {
             vertexCount++;
         }
         //Left
-        if (ch->GetBlockAt(pos + glm::ivec3{ -1,0,0 }) == AIR|| transparent) {
+        auto bl2 = GetNeighborBlock(pos + glm::ivec3{ -1,0,0 });
+        if (bl2 == AIR|| transparent||IsTransparentBlock(bl2)) {
             AO[2][0] = CalculateAO(
                 { -1, 0, 0 },
                 { 0, 0, -1 },
@@ -952,7 +1009,8 @@ void UploadChunk(chunk* ch) {
             vertexCount++;
         }
         //Right
-        if (ch->GetBlockAt(pos + glm::ivec3{ 1,0,0 }) == AIR|| transparent) {
+        auto bl3 = GetNeighborBlock(pos + glm::ivec3{ 1,0,0 });
+        if (bl3 == AIR|| transparent||IsTransparentBlock(bl3)) {
             AO[3][0] = CalculateAO(
                 { 1, 0, 0 },
                 { 0, 0, 1 },
@@ -1011,7 +1069,8 @@ void UploadChunk(chunk* ch) {
             vertexCount++;
         }
         //Top
-        if (ch->GetBlockAt(pos + glm::ivec3{ 0,1,0 }) == AIR|| transparent) {
+        auto bl4 = GetNeighborBlock(pos + glm::ivec3{ 0,1,0 });
+        if (bl4 == AIR|| transparent||IsTransparentBlock(bl4)) {
             AO[4][0] = CalculateAO(
                 { 0, 1, 0 },
                 { -1, 0, 0 },
@@ -1069,7 +1128,8 @@ void UploadChunk(chunk* ch) {
             vertexCount++;
         }
         //Bottom
-        if (ch->GetBlockAt(pos + glm::ivec3{ 0,-1,0 }) == AIR|| transparent) {
+        auto bl5 = GetNeighborBlock(pos + glm::ivec3{ 0,-1,0 });
+        if (bl5 == AIR|| transparent||IsTransparentBlock(bl5)) {
             AO[5][0] = CalculateAO(
                 { 0, -1, 0 },
                 { -1, 0, 0 },
@@ -1930,6 +1990,7 @@ void onScroll(GLFWwindow* window, double xoffset, double yoffset) {
     }
     
 }
+bool fly = false;
 float screenshottimer = 0.0f;
 void ScreenshotPanorama();
 void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -1953,6 +2014,9 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
     }
     else if (key == GLFW_KEY_F3 && action == GLFW_PRESS) {
         ScreenshotPanorama();
+    }
+    else if (key == GLFW_KEY_F && action == GLFW_PRESS) {
+        fly = !fly;
     }
     else if (key == GLFW_KEY_F4 && action == GLFW_PRESS) {
         yaw = std::round(yaw / 90.0f) * 90.0f;
@@ -1982,6 +2046,77 @@ enum worldtype {
 };
 worldtype WORLD_TYPE = OVERWORLD;
 void GenerateWorldChunk(ChunkPos cp);
+
+void placeTree(ChunkPos cp, float x, float y, float z, float trunkHeight);
+int SEED = 1308;
+void GenerateStructures(ChunkPos cp) {
+    chunk& ch = ChunkPool.at(cp);
+    int GRID_SIZE = 400;
+    switch (WORLD_TYPE) {
+    case OVERWORLD:
+        
+        for (int x = 0;x < 16;x++) {
+            for (int z = 0;z < 16;z++) {
+                //drzewka
+                int worldX = cp.x * 16 + x;
+                int worldZ = cp.z * 16 + z;
+                float trfrequency = 0.3f;
+
+
+                float treef = 8.0;
+                float treeamp = 15.0f;
+                float treeval = PERLIN::perlin(worldX * treef / (GRID_SIZE / 2), worldZ * treef / (GRID_SIZE / 2)) * treeamp;
+
+                //if (x % spacing == 0 && z % spacing == 0)
+                //{
+                float n = noise2D(worldX, worldZ, SEED) * 0.95f;
+
+                //if (n < std::min(density- treeval*10.0f,0.3f))
+                //{
+                int color = sky_limit;
+                for (int i = sky_limit;i > 0;i--) {
+                    block bl = ch.GetBlockAt({ x,i,z });
+                    if (bl == AIR||bl==OAK_LEAVES||bl==OAK_LOG) {
+                        color = i;
+                    }
+                    else {
+                        break;
+                    }
+
+                }
+                if (color == 0) {
+                    std::cout << "AAAA";
+                }
+
+                if (n > 0.9f && treeval > 0.0f)
+                    placeTree(cp, x, color, z, RandomNumber(5,8));
+                //ch.SetBlock({ x,color,z }, COBBLE);
+            //}
+        //}
+
+
+
+            }
+        }
+        break;
+
+    case END:
+
+        break;
+
+    case NETHER:
+
+        break;
+
+
+
+        break;
+    }
+    ch.structuresGenerated = true;
+}
+
+
+
 void LoadChunks(float spareTime) {
     float timepassed = 0.0f;
     float chunktime = 0.0f;
@@ -2036,7 +2171,7 @@ void LoadChunks(float spareTime) {
         auto [it, inserted] = ChunkPool.try_emplace(cp);
         it->second.chunkPos = cp;
 
-        if (inserted)
+        if (!it->second.generatedchunk)
         {
             float tmm = glfwGetTime();
             GenerateWorldChunk(cp);
@@ -2049,15 +2184,59 @@ void LoadChunks(float spareTime) {
         else
         {
             auto& ch = it->second;
-            if (ch.generatedchunk && !ch.generated) {
-                ch.Generate();
-                ch.dirty = false;
-            }
             if (ch.dirty)
             {
                 ch.Generate();
                 ch.dirty = false;
             }
+            if (ch.generatedchunk && !ch.generated) {
+                ch.Generate();
+                ch.dirty = false;
+            }
+            else if (!ch.AOupdated) {
+                if (!ch.structuresGenerated) {
+                    GenerateStructures(cp);
+                }
+                bool c1=false;
+                bool c2 = false;
+                bool c3 = false;
+                bool c4 = false;
+                bool c5 = false;
+                bool c6 = false;
+                bool c7 = false;
+                bool c8 = false;
+
+                if (ChunkPool.count(cp + ChunkPos{ -1, 0 })) {
+                    c1 = ChunkPool.at(cp + ChunkPos{ -1, 0 }).generated;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 1, 0 })) {
+                    c2 = ChunkPool.at(cp + ChunkPos{ 1, 0 }).generated;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 0, -1 })) {
+                    c3 = ChunkPool.at(cp + ChunkPos{ 0, -1 }).generated;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ -1, 0 })) {
+                    c4 = ChunkPool.at(cp + ChunkPos{ -1, 0 }).generated;
+                }
+
+                if (ChunkPool.count(cp + ChunkPos{ -1, -1 })) {
+                    c5 = ChunkPool.at(cp + ChunkPos{ -1, -1 }).generated;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 1, 1 })) {
+                    c6 = ChunkPool.at(cp + ChunkPos{ 1, 1 }).generated;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 1, -1 })) {
+                    c7 = ChunkPool.at(cp + ChunkPos{ 1, -1 }).generated;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ -1, 1 })) {
+                    c8 = ChunkPool.at(cp + ChunkPos{ -1, 1 }).generated;
+                }
+                if (c1&&c2&&c3&&c4&&c5&&c6&&c7&&c8) {//brb
+                    ch.dirty = true;
+                    ch.AOupdated = true;
+                }
+            }
+            
         }
 
         float tm2 = glfwGetTime();
@@ -2075,8 +2254,13 @@ void ScreenShot();
 
 int main()
 {
-    //player.position.x = -8000000000.0;
-    PERLIN::generatePermutation(1308);
+    //fly = true;
+    //FARLANDS BORDER: 16777200.0
+    //player.position.x = 16777216.0;
+    //player.position.z = 16777216.0;
+    SEED = RandomNumber(0, 99999999);
+    
+    PERLIN::generatePermutation(SEED);
     
 #pragma region Init
     if (!glfwInit()) {
@@ -2636,6 +2820,55 @@ int main()
     }
 #pragma endregion
 
+#pragma region Crosshair
+
+    {
+        float thickness = 0.04f;
+        std::vector<vertex> SquareVerts = {
+            vertex(-0.5f, -thickness,  0.0f, 0.0f, 0.0f),
+            vertex(0.5f,  thickness,  0.0f, 1.0f, 1.0f),
+            vertex(-0.5f,  thickness,  0.0f, 0.0f, 1.0f),
+
+            vertex(-0.5f, -thickness,  0.0f, 0.0f, 0.0f),
+            vertex(0.5f, -thickness,  0.0f, 1.0f, 0.0f),
+            vertex(0.5f,  thickness,  0.0f, 1.0f, 1.0f),
+
+
+            vertex(-thickness, -0.5f,  0.0f, 0.0f, 0.0f),
+            vertex(thickness,  -thickness,  0.0f, 1.0f, 1.0f),
+            vertex(-thickness,  -thickness,  0.0f, 0.0f, 1.0f),
+
+            vertex(-thickness, -0.5f,  0.0f, 0.0f, 0.0f),
+            vertex(thickness, -0.5f,  0.0f, 1.0f, 0.0f),
+            vertex(thickness,  -thickness,  0.0f, 1.0f, 1.0f),
+
+            vertex(-thickness, -0.5f+0.5f+thickness,  0.0f, 0.0f, 0.0f),
+            vertex(thickness,  0.5f,  0.0f + thickness, 1.0f, 1.0f),
+            vertex(-thickness,  0.5f,  0.0f + thickness, 0.0f, 1.0f),
+
+            vertex(-thickness, -0.5f + 0.5f + thickness,  0.0f, 0.0f, 0.0f),
+            vertex(thickness, -0.5f + 0.5f + thickness,  0.0f, 1.0f, 0.0f),
+            vertex(thickness,  0.5f,  0.0f + thickness, 1.0f, 1.0f),
+
+
+        };
+
+        uint vbo;
+        glGenVertexArrays(1, &crosshair);
+        glGenBuffers(1, &vbo);
+
+        glBindVertexArray(crosshair);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+        glBufferData(GL_ARRAY_BUFFER, SquareVerts.size() * sizeof(vertex), SquareVerts.data(), GL_STATIC_DRAW);
+        //pos
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (const void*)0);
+
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+#pragma endregion
 
 
     
@@ -2799,16 +3032,18 @@ int main()
                         player.position.z - playerchunk.z * 16
                     );
                     int lvl = 0;
-                    chunk& ch = ChunkPool.at(playerchunk);
-                    for (int y = 0;y < 255;y++) {
-                        if (ch.GetBlockAt({ local.x, y, local.z })!=AIR) {
-                            lvl++;
+                    
+                        chunk& ch = ChunkPool.at(playerchunk);
+                        for (int y = sky_limit;y > 0;y--) {
+                            if (ch.GetBlockAt({ local.x, y, local.z }) == AIR) {
+                                lvl=y;
+                            }
+                            else {
+                                break;
+                            }
                         }
-                        else {
-                            break;
-                        }
-                    }
-                    player.position.y = lvl+6.0f;
+                        player.position.y = lvl + 6.0f;
+                    
                 }
             }
 
@@ -2867,6 +3102,7 @@ int main()
             float dist = 0.0f;
             float step = 0.1f;
             mvploc2 = glGetUniformLocation(HighlightShaderProgram, "MVP");
+            highlightcolorloc = glGetUniformLocation(HighlightShaderProgram, "color");
             glUseProgram(HighlightShaderProgram);
             ChunkPos Hchunk(0, 0);
             glm::ivec3 localpos(0, 0, 0);
@@ -2922,14 +3158,38 @@ int main()
             glm::mat4 MVP = projection * view * model;
             if (hitblock) {
                 glUniformMatrix4fv(mvploc2, 1, GL_FALSE, glm::value_ptr(MVP));
+                glUniform4f(highlightcolorloc, 0.0f, 0.0f, 0.0f, 1.0f);
                 glLineWidth(2.0f);
                 glDrawArrays(GL_LINES, 0, 32);
             }
 
+            {
+                glUseProgram(HighlightShaderProgram);
+                glDisable(GL_DEPTH_TEST);
+                glDisable(GL_CULL_FACE);
+                glEnable(GL_BLEND);
+
+                glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+                glBindVertexArray(crosshair);
+                glm::mat4 model(1.0f);
+                model = glm::translate(model, glm::vec3(0.5f * width, 0.5f * height, 0.0f));
+                model = glm::scale(model, glm::vec3(30.0f, 30.0f, 1.0f));
+
+                glUniform4f(highlightcolorloc, 1.0f, 1.0f, 1.0f, 0.3f);
 
 
+                glUniformMatrix4fv(mvploc2, 1, GL_FALSE, glm::value_ptr(proj * model));
+                //brb
+                glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ZERO);
+                glDrawArrays(GL_TRIANGLES, 0, 18);
+            }//brb
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             //block display
+            glEnable(GL_CULL_FACE);
+            glEnable(GL_DEPTH_TEST);
             drawCubeDisplay();
+            
+            //draw crosshair
             
 
 
@@ -3196,7 +3456,7 @@ bool CollidesWithBlocks(const AABB& box)
 
     return false;
 }
-bool fly = true;
+
 //i hate physics with all my heart
 void movement(float deltaTime)
 {
@@ -3248,14 +3508,14 @@ void movement(float deltaTime)
     if (horMove.x != 0.0f) {
         AABB testbox = player.box;
         testbox.position.x += horMove.x;
-        if (!CollidesWithBlocks(testbox)) {
+        if (!CollidesWithBlocks(testbox)||fly) {
             player.position.x += horMove.x;
         }
     }
     if (horMove.z != 0.0f) {
         AABB testbox = player.box;
         testbox.position.z += horMove.z;
-        if (!CollidesWithBlocks(testbox)) {
+        if (!CollidesWithBlocks(testbox)||fly) {
             player.position.z += horMove.z;
         }
     }
@@ -3665,38 +3925,46 @@ void refreshCubeDisplay() {
 }
 
 const int GRID_SIZE = 400;
-int SEED = 1308;
-void placeTree(chunk& ch, float x, float y, float z, float trunkHeight) {
 
-    
-    ch.SetBlock({ x,y + trunkHeight,z }, OAK_LEAVES);
-    ch.SetBlock({ x + 1,y + trunkHeight,z }, OAK_LEAVES);
-    ch.SetBlock({ x - 1,y + trunkHeight,z }, OAK_LEAVES);
-    ch.SetBlock({ x,y + trunkHeight,z + 1 }, OAK_LEAVES);
-    ch.SetBlock({ x,y + trunkHeight,z-1 }, OAK_LEAVES);
+void placeTree(ChunkPos cp, float x, float y, float z, float trunkHeight)
+{
+    glm::vec3 base = glm::vec3(cp.x * 16.0, 0.0, cp.z * 16.0)
+        + glm::vec3(x, y, z);
+    for (int i = 0; i < trunkHeight; i++)
+        GlobalSetBlockAtNoDirty(base + glm::vec3(0, i, 0), OAK_LOG);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(0, trunkHeight, 0), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(1, trunkHeight, 0), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(-1, trunkHeight, 0), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(0, trunkHeight, 1), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(0, trunkHeight, -1), OAK_LEAVES);
 
+    GlobalSetBlockAtNoDirty(base + glm::vec3(1, trunkHeight - 1, 0), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(-1, trunkHeight - 1, 0), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(0, trunkHeight - 1, 1), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(0, trunkHeight - 1, -1), OAK_LEAVES);
 
-    ch.SetBlock({ x + 1,y + trunkHeight-1,z }, OAK_LEAVES);
-    ch.SetBlock({ x - 1,y + trunkHeight-1,z }, OAK_LEAVES);
-    ch.SetBlock({ x,y + trunkHeight-1,z + 1 }, OAK_LEAVES);
-    ch.SetBlock({ x,y + trunkHeight-1,z - 1 }, OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(1, trunkHeight - 1, 1), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(1, trunkHeight - 1, -1), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(-1, trunkHeight - 1, 1), OAK_LEAVES);
+    GlobalSetBlockAtNoDirty(base + glm::vec3(-1, trunkHeight - 1, -1), OAK_LEAVES);
 
-    ch.SetBlock({ x + 1,y + trunkHeight - 1,z + 1 }, OAK_LEAVES);
-    ch.SetBlock({ x + 1,y + trunkHeight - 1,z-1 }, OAK_LEAVES);
-    ch.SetBlock({ x - 1,y + trunkHeight - 1,z + 1 }, OAK_LEAVES);
-    ch.SetBlock({ x - 1,y + trunkHeight - 1,z - 1 }, OAK_LEAVES);
     for (int yOffset = -3; yOffset <= -2; yOffset++)
         for (int xOffset = -1; xOffset <= 1; xOffset++)
             for (int zOffset = -2; zOffset <= 2; zOffset++)
-                ch.SetBlock({ x + xOffset, y + trunkHeight + yOffset, z + zOffset }, OAK_LEAVES);
+                GlobalSetBlockAtNoDirty(
+                    base + glm::vec3(xOffset, trunkHeight + yOffset, zOffset),
+                    OAK_LEAVES
+                );
+
     for (int yOffset = -3; yOffset <= -2; yOffset++)
         for (int xOffset = -2; xOffset <= 2; xOffset++)
             for (int zOffset = -1; zOffset <= 1; zOffset++)
-                ch.SetBlock({ x + xOffset, y + trunkHeight + yOffset, z + zOffset }, OAK_LEAVES);
+                GlobalSetBlockAtNoDirty(
+                    base + glm::vec3(xOffset, trunkHeight + yOffset, zOffset),
+                    OAK_LEAVES
+                );
+
     
-    for (int i = 0;i < trunkHeight;i++) {
-        ch.SetBlock({ x,y + i,z }, OAK_LOG);
-    }
 }
 void GenerateWorldChunk(ChunkPos cp) {
     chunk& ch = ChunkPool.at(cp);
@@ -3720,6 +3988,10 @@ void GenerateWorldChunk(ChunkPos cp) {
 
                 int worldX = cp.x * 16 + x;
                 int worldZ = cp.z * 16 + z;
+
+
+
+
                 float base = PERLIN::fbm(
                     worldX / 300.0f,
                     worldZ / 300.0f,
@@ -3744,7 +4016,7 @@ void GenerateWorldChunk(ChunkPos cp) {
                     mountain * mountainMask * 70.0f +
                     detail * 8.0f;
 
-                int height = 64 + (int)heightNoise;
+                int height = 128 + (int)heightNoise;
                 height = std::clamp(height, 1, 255);
                 frequency *= 2;
                 frequency *= 2;
@@ -3761,13 +4033,22 @@ void GenerateWorldChunk(ChunkPos cp) {
                 val = PERLIN::perlin(worldX * frequency / GRID_SIZE, worldZ * frequency / GRID_SIZE) * amplitude;
                 colorstone = (int)(((val + 1.0f) * 0.5f) * 255);
                 
+                
 
                 if (val > 1.0f)
                     val = 1.0f;
                 else if (val < -1.0f)
                     val = -1.0f;
                 int color = height;
+               
                 color = std::max(3.0f, color*1.0f);
+                //farlands heheheehe
+                bool farlands = false;
+                if (abs(worldX) > 16777200.0 || abs(worldZ) > 16777200) {
+                    farlands = true;
+                    colorstone += 100;
+                    color += 100;
+                }
                 for (int y = 0;y < color;y++) {
                     if (y == color - 1) {
                         ch.SetBlock({ x,y,z }, GRASS);
@@ -3779,33 +4060,97 @@ void GenerateWorldChunk(ChunkPos cp) {
                 }
 
 
-                colorstone = std::max(3.0f, colorstone-80.0f);
+                colorstone = std::max(3.0f, colorstone-20.0f);
                 for (int y = 0;y < colorstone;y++) {
                     
                     ch.SetBlock({ x,y,z }, STONE);
 
                 }
-
-                ////drzewka
-                float trfrequency = 0.3f;
-
-                int spacing = 3;
-                float density = 0.3f;
-                float treef = 8.0;
-                float treeamp = 0.125;
-                float treeval = PERLIN::perlin(worldX * treef / GRID_SIZE, worldZ * treef / GRID_SIZE) * treeamp;
-
-                if (x % spacing == 0 && z % spacing == 0)
-                {
-                    float n = noise2D(x / spacing, z / spacing, SEED);
-                    
-                    if (n < std::min(density- treeval*10.0f,0.3f))
-                    {
-                        placeTree(ch, x, color, z, 5);
-                        //ch.SetBlock({ x,color,z }, COBBLE);
+                //rudy
+                for (int y = 1;y < 100;y++) {
+                    float frequency = 30.0f;
+                    float amplitude = 2.0f;
+                    float ore = PERLIN::perlin3d(worldX * frequency / (GRID_SIZE/4), y * frequency / (GRID_SIZE/4), worldZ * frequency / (GRID_SIZE/4)) * amplitude;
+                    //std::cout << cave << std::endl;
+                    if (y < 24) {
+                        float diamfreq = 1.1f;
+                        float diamondNoise = PERLIN::perlin3d(
+                            worldX* diamfreq,
+                            y * diamfreq,
+                            worldZ * diamfreq
+                        );
+                        //diamondNoise += 1;
+                        //diamondNoise *= 0.5f;
+                        //diamondNoise *= 0.1f;
+                        //std::cout << diamondNoise;
+                        //std::cout << diamondNoise << std::endl;
+                        if (diamondNoise > 0.71f) {
+                            ch.SetBlock({ x, y, z }, DIAMOND_ORE);
+                            //std::cout << "DIAMONDS";
+                        }
+                    }
+                    else {
+                       
+                        if (ore > 0.95f) {
+                            ch.SetBlock({ x,y,z }, COAL_ORE);
+                        }
+                        if (ore > 0.97f) {
+                            ch.SetBlock({ x,y,z }, IRON_ORE);
+                        }
+                        if (ore > 1.2f) {
+                            ch.SetBlock({ x,y,z }, GOLD_ORE);
+                        }
+                        
+                        
                     }
                 }
-               
+
+
+                //jaskinie
+                //farlands heheheehe
+                int cavelimit = 100;
+                if (farlands) {
+                    cavelimit += 200;
+                }
+                for (int y = 1;y < cavelimit;y++) {
+                    float frequency = 10.0f;
+                    float amplitude = 2.0f;
+                    if (farlands) {
+                        amplitude = 30.0f;
+                    }
+
+                    float ore = PERLIN::perlin3d(worldX * frequency / (GRID_SIZE / 4), y * frequency / (GRID_SIZE / 4), worldZ * frequency / (GRID_SIZE / 4)) * amplitude;
+                    //std::cout << cave << std::endl;
+                    if (ore > 0.8f) {
+                        ch.SetBlock({ x,y,z }, AIR);
+                    } 
+                }
+                //duze
+                for (int y = 1;y < cavelimit/2;y++) {
+                    float frequency = 2.0f;
+                    float amplitude = 3.0f;
+                    
+                    float ore = PERLIN::perlin3d(worldX * frequency / (GRID_SIZE / 3), y * frequency / (GRID_SIZE / 3), worldZ * frequency / (GRID_SIZE / 3)) * amplitude;
+                    if (farlands) {
+                        ore = 1.0f - ore;
+                    }
+                    //std::cout << cave << std::endl;
+                    float heightFactor = glm::smoothstep(20.0f, 50.0f, (float)y);
+                    float threshold = glm::mix(1.2f, 2.5f, heightFactor);
+                    
+                    if (ore > threshold) {
+                        
+                        ch.SetBlock({ x,y,z }, AIR);
+                    }
+                }
+                ch.FillBlocks({ 0,0,0 }, { 15,0,15 }, BEDROCK);
+                ////drzewka
+                
+                float bedrock = noise2D(worldX, worldZ, 1308);
+                if (bedrock > 0.9f) {
+                    ch.SetBlock({ x,1,z }, BEDROCK);
+                }
+
 
 
                

@@ -33,3 +33,17 @@ float noise2D(int x, int y, uint32_t seed)
     return static_cast<float>(h) /
         static_cast<float>(UINT32_MAX);
 }
+
+float noise3D(int x, int y, int z, uint32_t seed)
+{
+    uint32_t h = static_cast<uint32_t>(x);
+
+    h ^= static_cast<uint32_t>(y) * 0x9e3779b9u;
+    h ^= static_cast<uint32_t>(z) * 0x85ebca6bu;
+
+    h = hashNoise(h, seed);
+
+    // 0-1
+    return static_cast<float>(h) /
+        static_cast<float>(UINT32_MAX);
+}
