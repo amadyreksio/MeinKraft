@@ -3006,7 +3006,7 @@ int main()
             player.tick();
             movement(deltaTime);
             //if (deltaTime < 1.0f / 60.0f) {
-                float spareTime = 1.0f / 60.0f-deltaTime;
+                float spareTime = std::max(1.0f / 240.0f, 1.0f / 60.0f - deltaTime);
                 if (fpstimer >= 1.0f) {
                     fpstimer = 0.0f;
                     std::cout << FPS <<" " <<spareTime<< std::endl;
