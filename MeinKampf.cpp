@@ -24,6 +24,8 @@
 #include <sstream>
 
 #include <functional>
+#include <filesystem>
+#include <fstream>
 
 #include "perlin.h"
 #include "noisenoise.h"
@@ -31,6 +33,7 @@
 const int sky_limit=256;
 std::random_device rd;
 std::uniform_real_distribution<float> rnd;
+std::string WORLDS_PATH = "worlds/";
 enum GameStates {
     MENU,WORLD_CHOOSE,INGAME
 };
@@ -401,6 +404,7 @@ public:
     float SPEED = 4.317f;
     float SPRINT_SPEED = 5.612f;
     int RenderDistance = 25;
+    int SimulationDistance = 4;
     float reach = 5.0f;
 
     bool grounded = false;
@@ -431,17 +435,18 @@ class chunk {
 private:
     
 public:
+    bool changedByPlayer = false;
     std::vector<vertex> vertices = {};
     std::vector<uint> indices = {};
     uint VAO = 0;
-    uint VBO, EBO;
+    uint VBO=0, EBO=0;
     bool AOupdated = false;
     bool structuresGenerated = false;
     int indicessize = 0;
     bool generating = false;
     bool loading = false;
     bool generated = false;
-    float generatedchunk = false;
+    bool generatedchunk = false;
     bool loaded = false;
     bool dirty = false;
     ChunkPos chunkPos = ChunkPos(0, 0);
@@ -452,14 +457,14 @@ public:
     }
     ~chunk()
     {
-        /*if (VAO)
+        if (VAO)
             glDeleteVertexArrays(1, &VAO);
 
         if (VBO)
             glDeleteBuffers(1, &VBO);
 
         if (EBO)
-            glDeleteBuffers(1, &EBO);*/
+            glDeleteBuffers(1, &EBO);
     }
     void Load() {
         if (!loaded || !generated) {
@@ -546,6 +551,116 @@ public:
         return glm::ivec3(x, y, z);
     }
 };
+std::string WorldName = "testworld";
+int SEED = 1308;
+std::unordered_map<ChunkPos, bool, ChunkHash> WorldSaveChunkList;
+void SaveWorld() {
+    std::string Data=std::to_string(SEED)+"\n";
+    for (auto& entry : WorldSaveChunkList) {
+        ChunkPos cp = entry.first;
+        Data += std::to_string(cp.x) + "," + std::to_string(cp.z) + "\n";
+    }
+    std::ofstream FILE(WORLDS_PATH + WorldName + "/" + "world.amady");
+    FILE.write(Data.c_str(), Data.length());
+    FILE.close();
+    
+}
+std::vector<std::string> SplitString(std::string text, char separator) {
+    std::vector<std::string> output;
+    std::string temp = "";
+    for (int i = 0;i < text.length();i++) {
+        if (text[i] != separator) {
+            temp += text[i];
+        }
+        else {
+            output.push_back(temp);
+            temp = "";
+        }
+    }
+    output.push_back(temp);
+    return output;
+}
+void LoadWorld() {
+    std::string Data;
+    if (!std::filesystem::exists(WORLDS_PATH + WorldName + "/" + "world.amady"))return;
+    std::ifstream FILE(WORLDS_PATH + WorldName + "/" + "world.amady");
+    std::string line;
+    int cnt = 0;
+    while (std::getline(FILE, line)) {
+        if (cnt == 0) {
+            //get seed
+            SEED = std::stoi(line);
+        }
+        else {
+            auto vec = SplitString(line, ',');
+            if (vec.size() >= 2) {
+                ChunkPos cp{ stoi(vec.at(0)), stoi(vec.at(1)) };
+                WorldSaveChunkList[cp] = true;
+            }
+        }
+        cnt++;
+    }
+    FILE.close();
+
+}
+void SaveChunk(ChunkPos cp) {
+    if (!ChunkPool.count(cp))return;
+    chunk* ch = &ChunkPool.at(cp);
+    if (!ch->changedByPlayer)return;
+    std::string fname = WORLDS_PATH + WorldName + "/" + std::to_string(cp.x) + "," + std::to_string(cp.z)+".chunk";
+    std::ofstream FILE(fname,std::ios::binary);
+    std::vector<uint8_t> data;
+    data.reserve(ch->BLOCKS.size());
+    
+    for (int i = 0; i < ch->BLOCKS.size(); i++) {
+        block b = ch->BLOCKS[i];
+        data.push_back(static_cast<uint8_t>(b));
+    }
+    WorldSaveChunkList[cp] = true;
+    FILE.write(reinterpret_cast<const char*>(data.data()), data.size());
+    FILE.close();
+}
+bool LoadChunk(ChunkPos cp)
+{
+    auto it = ChunkPool.find(cp);
+    if (it == ChunkPool.end())
+        return false;
+
+    chunk& ch = it->second;
+
+    std::string fname =WORLDS_PATH + WorldName + "/" +std::to_string(cp.x) + "," +std::to_string(cp.z) + ".chunk";
+
+    std::ifstream FILE(fname, std::ios::binary);
+
+    if (!FILE)
+    {
+        std::cerr << "No load chunk: " << fname << '\n';
+        return false;
+    }
+
+    FILE.read(
+        reinterpret_cast<char*>(ch.BLOCKS.data()),
+        ch.BLOCKS.size() * sizeof(block)
+    );
+
+    if (FILE.gcount() != static_cast<std::streamsize>(
+        ch.BLOCKS.size() * sizeof(block)))
+    {
+        std::cerr << "CORRUPT CHUNK: "
+            << fname << " ("
+            << FILE.gcount() << "/"
+            << ch.BLOCKS.size() << " bytes)\n";
+
+        return false;
+    }
+
+    ch.chunkPos = cp;
+    ch.loaded = true;
+
+    return true;
+}
+
+
 void GlobalSetBlockAtNoDirty(glm::ivec3 position, block BlockType) {
     ChunkPos cp(
         static_cast<int>(floor(position.x / 16.0)),
@@ -585,9 +700,9 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
         return;
 
     auto [it, inserted] = ChunkPool.try_emplace(cp);
-
     it->second.SetBlock(local, BlockType);
     it->second.dirty = true;
+    it->second.changedByPlayer = true;
     //it->second.Generate2(local);
     if (local.x > 14) {
         ChunkPos cp2(
@@ -647,6 +762,7 @@ void GlobalBreakBlock(glm::ivec3 position) {
 
     it->second.RemoveBlock(local);
     it->second.dirty = true;
+    it->second.changedByPlayer = true;
 
     if (local.x > 14) {
         ChunkPos cp2(
@@ -1915,8 +2031,9 @@ void mouseDown(GLFWwindow* window, int button, int action, int mods) {
                 { -0.5f, -0.5f, -0.5f },
                 { 0.5f,  0.5f,  0.5f }
             );
-            if(!checkAABBCollision(blockAABB,player.box))
+            if (!checkAABBCollision(blockAABB, player.box)) {
                 GlobalSetBlockAt(previousBlock, static_cast<block>(currentblock));
+            }
         }
     }
     if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_1) {
@@ -2018,6 +2135,11 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
     else if (key == GLFW_KEY_F && action == GLFW_PRESS) {
         fly = !fly;
     }
+    else if (key == GLFW_KEY_G && action == GLFW_PRESS) {
+        int playerChunkX = static_cast<int>(std::floor(player.position.x / 16.0f));
+        int playerChunkZ = static_cast<int>(std::floor(player.position.z / 16.0f));
+        SaveChunk({ playerChunkX,playerChunkZ });
+    }
     else if (key == GLFW_KEY_F4 && action == GLFW_PRESS) {
         yaw = std::round(yaw / 90.0f) * 90.0f;
         pitch = std::round(pitch / 90.0f) * 90.0f;
@@ -2044,11 +2166,12 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
 enum worldtype {
     OVERWORLD=0, FLAT=1, NETHER=2, END=3
 };
+
 worldtype WORLD_TYPE = OVERWORLD;
 void GenerateWorldChunk(ChunkPos cp);
 
 void placeTree(ChunkPos cp, float x, float y, float z, float trunkHeight);
-int SEED = 1308;
+
 void GenerateStructures(ChunkPos cp) {
     chunk& ch = ChunkPool.at(cp);
     int GRID_SIZE = 400;
@@ -2088,8 +2211,10 @@ void GenerateStructures(ChunkPos cp) {
                     std::cout << "AAAA";
                 }
 
+                float treeHeightNoise = noise2D(worldX * 3, worldZ * 3, SEED + 777);
+                float trunkHeight = 5.0f + treeHeightNoise * 3.0f;
                 if (n > 0.9f && treeval > 0.0f)
-                    placeTree(cp, x, color, z, RandomNumber(5,8));
+                    placeTree(cp, x, color, z, trunkHeight);
                 //ch.SetBlock({ x,color,z }, COBBLE);
             //}
         //}
@@ -2114,7 +2239,21 @@ void GenerateStructures(ChunkPos cp) {
     }
     ch.structuresGenerated = true;
 }
-
+void SaveChangedChunks() {
+    int playerChunkX = static_cast<int>(std::floor(player.position.x / 16.0f));
+    int playerChunkZ = static_cast<int>(std::floor(player.position.z / 16.0f));
+    for (int x = playerChunkX - player.RenderDistance;x < playerChunkX + player.RenderDistance;x++) {
+        for (int z = playerChunkZ - player.RenderDistance;z < playerChunkZ + player.RenderDistance;z++) {
+            ChunkPos cp{ x,z };
+            if (!ChunkPool.count(cp))continue;
+            chunk* ch = &ChunkPool.at(cp);
+            if (ch->changedByPlayer) {
+                SaveChunk(cp);
+                ch->changedByPlayer = false;
+            }
+        }
+    }
+}
 
 
 void LoadChunks(float spareTime) {
@@ -2126,30 +2265,45 @@ void LoadChunks(float spareTime) {
     {
         ChunkPos pos;
         float distanceSq;
+        bool indistance = true;
     };
 
     std::vector<Chunktorender> chunks;
 
-    for (int x = playerChunkX - player.RenderDistance;
-        x <= playerChunkX + player.RenderDistance;
+    for (int x = playerChunkX - player.RenderDistance-player.SimulationDistance*2;
+        x <= playerChunkX + player.RenderDistance+player.SimulationDistance*2;
         x++)
     {
-        for (int z = playerChunkZ - player.RenderDistance;
-            z <= playerChunkZ + player.RenderDistance;
+        for (int z = playerChunkZ - player.RenderDistance - player.SimulationDistance * 2;
+            z <= playerChunkZ + player.RenderDistance + player.SimulationDistance * 2;
             z++)
         {
             float dx = float(x - playerChunkX);
             float dz = float(z - playerChunkZ);
 
             float distanceSq = dx * dx + dz * dz;
-
             if (distanceSq <= player.RenderDistance * player.RenderDistance)
             {
                 chunks.push_back({
                     ChunkPos(x, z),
-                    distanceSq
+                    distanceSq,
+                    true
                     });
             }
+            else if (distanceSq <= (player.RenderDistance + player.SimulationDistance) * (player.RenderDistance + player.SimulationDistance)) {
+                chunks.push_back({
+                    ChunkPos(x, z),
+                    distanceSq,
+                    false
+                    });
+            }
+            else {
+               //unload
+                SaveChunk({ x,z });
+                //auto it = ChunkPool.find();
+                ChunkPool.erase({ x,z });
+            }
+             
         }
     }
     std::sort(chunks.begin(), chunks.end(),
@@ -2161,6 +2315,7 @@ void LoadChunks(float spareTime) {
 
     for (const auto& ch : chunks)
     {
+        if (!ch.indistance)continue;
         if (timepassed + chunktime * 2 >= spareTime)
             return;
 
@@ -2170,7 +2325,50 @@ void LoadChunks(float spareTime) {
 
         auto [it, inserted] = ChunkPool.try_emplace(cp);
         it->second.chunkPos = cp;
+        if (WorldSaveChunkList.count(cp)&&ChunkPool.count(cp)&&!ChunkPool.at(cp).generatedchunk) {
+            if (LoadChunk(cp))
+            {
+                chunk* ch = &ChunkPool.at(cp);
 
+                ch->changedByPlayer = false;
+                ch->structuresGenerated = true;
+                ch->generatedchunk = true;
+                ch->generated = false;
+                ch->dirty = true;
+                ch->loaded = false;
+                if (ChunkPool.count(cp + ChunkPos{ -1, 0 })) {
+                    ChunkPool.at(cp + ChunkPos{ -1, 0 }).dirty = true;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 1, 0 })) {
+                    ChunkPool.at(cp + ChunkPos{ 1, 0 }).dirty = true;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 0, -1 })) {
+                    ChunkPool.at(cp + ChunkPos{ 0, -1 }).dirty = true;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ -1, 0 })) {
+                    ChunkPool.at(cp + ChunkPos{ -1, 0 }).dirty = true;
+                }
+
+                if (ChunkPool.count(cp + ChunkPos{ -1, -1 })) {
+                    ChunkPool.at(cp + ChunkPos{ -1, -1 }).dirty = true;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 1, 1 })) {
+                    ChunkPool.at(cp + ChunkPos{ 1, 1 }).dirty = true;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ 1, -1 })) {
+                    ChunkPool.at(cp + ChunkPos{ 1, -1 }).dirty = true;
+                }
+                if (ChunkPool.count(cp + ChunkPos{ -1, 1 })) {
+                    ChunkPool.at(cp + ChunkPos{ -1, 1 }).dirty = true;
+                }
+            }
+            else
+            {
+                it->second.generatedchunk = false;
+                std::cout << "AAAAAA";
+            }
+            
+        }
         if (!it->second.generatedchunk)
         {
             float tmm = glfwGetTime();
@@ -2215,8 +2413,8 @@ void LoadChunks(float spareTime) {
                 if (ChunkPool.count(cp + ChunkPos{ 0, -1 })) {
                     c3 = ChunkPool.at(cp + ChunkPos{ 0, -1 }).generated;
                 }
-                if (ChunkPool.count(cp + ChunkPos{ -1, 0 })) {
-                    c4 = ChunkPool.at(cp + ChunkPos{ -1, 0 }).generated;
+                if (ChunkPool.count(cp + ChunkPos{ 0, 1 })) {
+                    c4 = ChunkPool.at(cp + ChunkPos{ 0, 1 }).generated;
                 }
 
                 if (ChunkPool.count(cp + ChunkPos{ -1, -1 })) {
@@ -2251,17 +2449,30 @@ uint CubeVAO;
 uint CUBEVBO;
 void ScreenShot();
 
+void CreateWorld(int seed, std::string worldName) {
+
+    if (!std::filesystem::exists(WORLDS_PATH + worldName+"/")) {
+        std::filesystem::create_directories(WORLDS_PATH + worldName+"/");
+    }
+    SEED = seed;
+    WorldName = worldName;
+    LoadWorld();
+    PERLIN::generatePermutation(SEED);
+}
+
 
 int main()
 {
+    if (!std::filesystem::exists(WORLDS_PATH)) {
+        std::filesystem::create_directories(WORLDS_PATH);
+    }
     //fly = true;
     //FARLANDS BORDER: 16777200.0
     //player.position.x = 16777216.0;
     //player.position.z = 16777216.0;
-    SEED = RandomNumber(0, 99999999);
-    
-    PERLIN::generatePermutation(SEED);
-    
+
+    CreateWorld(RandomNumber(0, 99999999), "testworld");
+    std::cout << SEED << std::endl;
 #pragma region Init
     if (!glfwInit()) {
         return -1;
@@ -2980,6 +3191,7 @@ int main()
     bool plrteleported = false;
 
     float fpstimer = 0.0f;
+    float worldSaveTimer = 0.0f;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
@@ -3010,7 +3222,8 @@ int main()
                 if (fpstimer >= 1.0f) {
                     fpstimer = 0.0f;
                     std::cout << FPS <<" " <<spareTime<< std::endl;
-                    std::cout << "POSITION: " << "X: " << player.position.x << " Y: " << player.position.y << " Z: " << player.position.z<<std::endl;
+                    //std::cout << ChunkPool.size() << std::endl;
+                    //std::cout << "POSITION: " << "X: " << player.position.x << " Y: " << player.position.y << " Z: " << player.position.z<<std::endl;
                 }
                 LoadChunks(spareTime);
             //}
@@ -3045,6 +3258,12 @@ int main()
                         player.position.y = lvl + 6.0f;
                     
                 }
+            }
+            worldSaveTimer += deltaTime;
+            if (worldSaveTimer >= 5.0f) {
+                worldSaveTimer = 0.0f;
+                SaveWorld();
+                SaveChangedChunks();
             }
 
             int width, height;
