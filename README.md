@@ -1,29 +1,30 @@
 ## AmadynaCraft
-It's a project I started yesterday.
+It's a project I started yesterday.<br>
 Will probably discontinue soon but who knows.
 
 
 ## Description
 This is my minecraft clone.
-Shocking.
-It includes:
-Chunk generation,
-Menu screen,
-Ambient Occlusion,
-Block placing/breaking, 
-Terrain generation, 
-Trees, 
-Caves, 
-Ores, 
-Some other blocks, 
-and i think that's it.
+Shocking.<br>
+It includes:<br>
+Chunk generation,<br>
+Menu screen,<br>
+Ambient Occlusion,<br>
+Block placing/breaking, <br>
+Terrain generation, <br>
+Trees, <br>
+Caves, <br>
+Ores, <br>
+Some other blocks, <br>
+World saving/loading <br>
+and i think that's it.<br>
 
 
 
 ## UPDATE
-It's starting to look.. good?
-Next update HAS to be the end update.
-Mojang hire me
+It's starting to look.. good?<br>
+Next update HAS to be the end update.<br>
+Mojang hire me<br>
 
 
 
