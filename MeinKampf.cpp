@@ -460,7 +460,7 @@ public:
     glm::dvec3 position{ 0.0f,6.0f,10.0f };
     float SPEED = 4.317f;
     float SPRINT_SPEED = 5.612f;
-    int RenderDistance = 100;
+    int RenderDistance = 25;
     int SimulationDistance = 4;
     float reach = 5.0f;
     float FogDistance = 1000.0f;
@@ -485,8 +485,12 @@ class chunk;
 std::unordered_map<ChunkPos, chunk, ChunkHash> ChunkPool;
 
 
-void UploadChunk(chunk* ch);
-
+void UploadChunk(chunk* ch, bool light=true);
+ChunkPos GetChunkAtBlock(glm::ivec3 blockpos);
+int GlobalGetLightAt(glm::ivec3 position);
+void GlobalSetLightAt(glm::ivec3 position, int LightLevel);
+glm::ivec3 LocalCoordToWorldCoord(chunk& ch, glm::ivec3 localpos);
+block GlobalGetBlockAt(glm::ivec3 position);
 struct subchunk {
 public:
     std::array<block, 16 * 16 * 16> BLOCKS{};
@@ -595,21 +599,22 @@ public:
 
     void Light() {
         std::queue<std::pair<glm::ivec3, int>> q;
-        LightData.fill(0);
+        //LightData.fill(0);
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
                 int topY = GetTopBlockAt(x, z);
                 //for (int y = sky_limit - 1; y > topY; y--) {
                     glm::ivec3 pos(x, topY, z);
-                    int id = GetID(pos);
-                    LightData[id] = 15;
-                    q.push({ pos, 15 });
+                    //int id = GetID(pos);
+//brb
+                    GlobalSetLightAt(LocalCoordToWorldCoord(*this,pos), 15);
+                    q.push({ LocalCoordToWorldCoord(*this,pos), 15 });
                 //}
             }
         }
         for (int i = 0;i < BLOCKS.size();i++) {
             if (IsLightBlock(BLOCKS[i])) {
-                q.push({ GetPosition(i), 15 });
+                q.push({ LocalCoordToWorldCoord(*this, GetPosition(i)), 15 });
             }
         }
 
@@ -618,17 +623,17 @@ public:
             q.pop();
 
             for (const auto& off : NDirs) {
-                glm::ivec3 n = pos + off;
-                if (n.x < 0 || n.x >= 16 ||
-                    n.y < 0 || n.y >= sky_limit ||
-                    n.z < 0 || n.z >= 16)
+                glm::ivec3 n = pos+off;
+                //add more limits to +2 chunks
+                if (n.y < 0 || n.y >= sky_limit||n.x<chunkPos.x*16-16 || n.x > chunkPos.x * 16 + 16
+                    || n.z<chunkPos.z * 16 - 16 || n.z > chunkPos.z * 16 + 16)
                     continue;
-                block nb = BLOCKS[GetID(n)];
+                block nb = GlobalGetBlockAt(n);
                 if (nb == AIR)
                     continue;
                 int newLevel = level - 1;
-                if (LightData[GetID(n)] < newLevel) {
-                    LightData[GetID(n)] = newLevel;
+                if (GlobalGetLightAt(n) < newLevel) {
+                    GlobalSetLightAt(n, newLevel);
                     q.push({ n, level-1 });
                 }
             }
@@ -729,7 +734,7 @@ enum worldtype {
 };
 worldtype WORLD_TYPE = OVERWORLD;
 std::string GetWorldPath() {
-    std::string fname = WORLDS_PATH + WorldName + "/" + (WORLD_TYPE == OVERWORLD ? "lvl0/" : (WORLD_TYPE == NETHER ? "lvl1/" : "lvl2/"));
+    std::string fname = WORLDS_PATH + WorldName + "/" + (WORLD_TYPE == OVERWORLD ? "lvl0/" : (WORLD_TYPE == NETHER ? "lvl1/" : (WORLD_TYPE==END? "lvl2/":"lvl3/")));
     return fname;
 }
 void SaveWorld() {
@@ -892,6 +897,7 @@ void GlobalSetBlockAt(glm::ivec3 position, block BlockType) {
 
     auto [it, inserted] = ChunkPool.try_emplace(cp);
     it->second.SetBlock(local, BlockType);
+    it->second.LightData.fill(0);
     it->second.dirty = true;
     it->second.changedByPlayer = true;
     //it->second.Generate2(local);
@@ -952,6 +958,7 @@ void GlobalBreakBlock(glm::ivec3 position) {
     auto [it, inserted] = ChunkPool.try_emplace(cp);
 
     it->second.RemoveBlock(local);
+    it->second.LightData.fill(0);
     it->second.dirty = true;
     it->second.changedByPlayer = true;
 
@@ -993,7 +1000,69 @@ void GlobalBreakBlock(glm::ivec3 position) {
     }
 
 }
+glm::ivec3 LocalCoordToWorldCoord(chunk& ch, glm::ivec3 localpos) {
+    
 
+    return glm::ivec3(ch.chunkPos.x*16,0, ch.chunkPos.z*16) + localpos;
+}
+glm::ivec3 WorldCoordToLocalCoord(glm::ivec3 worldpos) {
+    ChunkPos cp(
+        static_cast<int>(glm::floor(worldpos.x / 16.0)),
+        static_cast<int>(glm::floor(worldpos.z / 16.0))
+    );
+
+    glm::ivec3 local(
+        worldpos.x - cp.x * 16,
+        worldpos.y,
+        worldpos.z - cp.z * 16
+    );
+    return local;
+
+    
+}
+ChunkPos GetChunkAtBlock(glm::ivec3 blockpos) {
+    ChunkPos cp(
+        static_cast<int>(glm::floor(blockpos.x / 16.0)),
+        static_cast<int>(glm::floor(blockpos.z / 16.0))
+    );
+    return cp;
+
+
+}
+int GlobalGetLightAt(glm::ivec3 position) {
+    ChunkPos cp(
+        static_cast<int>(glm::floor(position.x / 16.0)),
+        static_cast<int>(glm::floor(position.z / 16.0))
+    );
+
+    glm::ivec3 local(
+        position.x - cp.x * 16,
+        position.y,
+        position.z - cp.z * 16
+    );
+    if (!ChunkPool.count(cp))
+        return 0;
+    chunk& ch = ChunkPool.at(cp);
+
+    return ch.LightData[ch.GetID(local)];
+}
+void GlobalSetLightAt(glm::ivec3 position, int LightLevel) {
+    ChunkPos cp(
+        static_cast<int>(glm::floor(position.x / 16.0)),
+        static_cast<int>(glm::floor(position.z / 16.0))
+    );
+
+    glm::ivec3 local(
+        position.x - cp.x * 16,
+        position.y,
+        position.z - cp.z * 16
+    );
+    if (!ChunkPool.count(cp))
+        return;
+    chunk& ch = ChunkPool.at(cp);
+
+    ch.LightData[ch.GetID(local)]=LightLevel;
+}
 block GlobalGetBlockAt(glm::ivec3 position)
 {
     ChunkPos cp(
@@ -1063,10 +1132,11 @@ void UploadSubChunk(subchunk* ch) {
 }
 
 
-void UploadChunk(chunk* ch) {
+void UploadChunk(chunk* ch, bool light) {
     ch->generated = false;
     ch->generating = true;
     //ChunkGenerateJobs.push_back()
+    if(light)
     ch->Light();
 
     ch->vertices.clear();
@@ -1850,7 +1920,7 @@ void keyDown(GLFWwindow* window, int key, int scancode, int action, int mods) {
         fly = !fly;
     }
     else if (key == GLFW_KEY_G && action == GLFW_PRESS) {
-        ChangeDimention((WORLD_TYPE == OVERWORLD ? NETHER : OVERWORLD));
+        ChangeDimention((WORLD_TYPE == OVERWORLD ? NETHER : (WORLD_TYPE==FLAT?OVERWORLD: FLAT)));
         
     }
     else if (key == GLFW_KEY_F4 && action == GLFW_PRESS) {
@@ -2173,6 +2243,9 @@ void CreateWorld(int seed, std::string worldName) {
     }
     if (!std::filesystem::exists(WORLDS_PATH + worldName + "/lvl2")) {
         std::filesystem::create_directories(WORLDS_PATH + worldName + "/lvl2");
+    }
+    if (!std::filesystem::exists(WORLDS_PATH + worldName + "/lvl3")) {
+        std::filesystem::create_directories(WORLDS_PATH + worldName + "/lvl3");
     }
     SEED = seed;
     WorldName = worldName;
@@ -3023,6 +3096,10 @@ int main()
                 break;
             case END:
                 player.FogColor = { 0.1f, 0.1f, 0.1f, 1.0f };
+                break;
+            case FLAT:
+                player.FogColor = { 1.0, 1.0, 1.0, 1.0f };
+                player.AmbientLight = 0.1f;
                 break;
             }
 
