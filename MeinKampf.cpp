@@ -89,7 +89,7 @@ float AmbientLight=AmbientStrength;
 aoLevel = mix(1.0, aoLevel, 0.8);
 aoLevel=min(1.0,aoLevel);
 vec4 texColor=texture(texture0, TextCoord);
-if(texColor.a<0.1)discard;
+if(texColor.a<0.6)discard;
 float fogval=distance(vec3(0.0),oaPos)/FogDistance;
 fogval*=fogval;
 //fogval=smoothstep(90.0f,100.0f,fogval);
@@ -2269,6 +2269,7 @@ int main()
     if (!glfwInit()) {
         return -1;
     }
+    //glfwInitHint(GLFW_SAMPLES, 4);
     window = glfwCreateWindow(960, 540, "MeinKampf", NULL, NULL);//960 540
 
     glfwGetWindowSize(window, &WIDTH, &HEIGHT);
@@ -2276,6 +2277,7 @@ int main()
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         return -1;
     }
+    //glEnable(GL_MULTISAMPLE);
 #pragma endregion
 
 
@@ -2454,7 +2456,11 @@ int main()
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-            GL_NEAREST);
+            GL_NEAREST_MIPMAP_LINEAR);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4);
+
+        glGenerateMipmap(ATLAS);
 
         //glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, -1.5f);
 
@@ -3131,6 +3137,31 @@ int main()
                         ChunkPos cp(static_cast<int>(x), static_cast<int>(z));
                         if (ChunkPool.count(cp)) {
                             glm::dvec3 chunkWorldOrigin = glm::dvec3(cp.x, 0.0, cp.z) * 16.0;
+
+
+                            //kind of frustim culling but more retarded
+                            glm::dvec3 chunkCenter =
+                                glm::dvec3(cp.x * 16.0 + 8.0,
+                                    0.0,
+                                    cp.z * 16.0 + 8.0);
+
+
+                            glm::dvec3 camfront = glm::dvec3(player.cam.front);
+                            camfront.y = 0.0f;
+                            if (glm::length(camfront) > 0)camfront = glm::normalize(camfront);
+
+                            glm::dvec3 downv = { 0,-1,0 };
+                            double down = std::max(0.0,std::min(glm::dot(downv, glm::dvec3(player.cam.front))+0.5,1.0));
+                            
+                            glm::dvec3 toChunk = chunkCenter -
+                                (glm::dvec3(player.cam.position.x+ player.position.x, 0.0, player.cam.position.z+player.position.z)-camfront*20.0-camfront *std::min((static_cast<double>(HEIGHT)*0.5)* down,100.0));
+                            if (glm::length(toChunk) > 0)toChunk = glm::normalize(toChunk);
+                           
+
+                            float dot = glm::dot(toChunk, camfront);
+                            if (dot <= 0.0)continue;
+                            
+
                             glm::vec3 relOffset = glm::vec3(chunkWorldOrigin - camWorldPos);
                             glm::mat4 model = glm::translate(glm::mat4(1.0f), relOffset);
                             
